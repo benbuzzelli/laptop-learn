@@ -1,0 +1,351 @@
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { HomeScreen } from './components/HomeScreen';
+import { AllDoneScreen } from './components/AllDoneScreen';
+import { EggHunt } from './games/egg-hunt/EggHunt';
+import { DinoPath } from './games/dino-path/DinoPath';
+import { SpellDino } from './games/spell-dino/SpellDino';
+import { VolcanoEscape } from './games/volcano-escape/VolcanoEscape';
+import { DinoMatch } from './games/dino-match/DinoMatch';
+import { DinoCollection } from './components/DinoCollection';
+import { ParentDashboard } from './components/ParentDashboard';
+import { initAudio } from './games/shared/audio';
+import type { GameId } from './games/shared/types';
+
+const TIMER_KEY = 'dinoLearn_timerMinutes';
+const TIMER_START_KEY = 'dinoLearn_timerStart';
+
+function getTimerMinutes(): number {
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('timer');
+  if (fromUrl) {
+    const mins = parseInt(fromUrl, 10);
+    if (mins > 0) {
+      try { localStorage.setItem(TIMER_KEY, String(mins)); } catch {}
+      return mins;
+    }
+  }
+  try {
+    const saved = localStorage.getItem(TIMER_KEY);
+    if (saved) return Math.max(0, parseInt(saved, 10) || 0);
+  } catch {}
+  return 0;
+}
+
+function App() {
+  const [currentGame, setCurrentGame] = useState<GameId | null>(null);
+  const [gameKey, setGameKey] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [remainingMs, setRemainingMs] = useState<number | null>(null);
+  const [showParentDash, setShowParentDash] = useState(false);
+  const [timerVersion, setTimerVersion] = useState(0);
+
+  // long-press state for fullscreen button
+  const longPressRef = useRef<number | null>(null);
+
+  // transition state
+  type TransitionPhase = 'idle' | 'fade-out' | 'fade-in';
+  const [transPhase, setTransPhase] = useState<TransitionPhase>('idle');
+  const pendingNavRef = useRef<GameId | null | undefined>(undefined);
+
+  // --- Keyboard blocker ---
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === 'w') { e.preventDefault(); return; }
+      if (mod && e.key === 'q') { e.preventDefault(); return; }
+      if (e.ctrlKey && e.key === 'F4') { e.preventDefault(); return; }
+      if (mod && e.key === 'r') { e.preventDefault(); return; }
+      if (e.key === 'F5') { e.preventDefault(); return; }
+      if (e.key === 'Backspace') {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') { e.preventDefault(); return; }
+      }
+      if (mod && e.key === 't') { e.preventDefault(); return; }
+      if (mod && e.key === 'n') { e.preventDefault(); return; }
+      if (mod && e.key === 'l') { e.preventDefault(); return; }
+      if (e.key === 'F6') { e.preventDefault(); return; }
+      if (mod && e.key === 'f') { e.preventDefault(); return; }
+      if (mod && e.key === 'p') { e.preventDefault(); return; }
+      if (mod && e.key === 'd') { e.preventDefault(); return; }
+      if (mod && e.key === 'h') { e.preventDefault(); return; }
+      if (e.key === 'F12') { e.preventDefault(); return; }
+      if (mod && e.altKey && e.key === 'i') { e.preventDefault(); return; }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    };
+  }, []);
+
+  // --- Fullscreen ---
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  }, []);
+
+  // --- Long press on fullscreen button to open parent dashboard ---
+  const handleFsPointerDown = useCallback(() => {
+    longPressRef.current = window.setTimeout(() => {
+      longPressRef.current = null;
+      setShowParentDash(true);
+    }, 1000);
+  }, []);
+
+  const handleFsPointerUp = useCallback(() => {
+    if (longPressRef.current !== null) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+      toggleFullscreen();
+    }
+  }, [toggleFullscreen]);
+
+  const handleFsPointerLeave = useCallback(() => {
+    if (longPressRef.current !== null) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  }, []);
+
+  // --- Session timer (re-runs when timerVersion changes) ---
+  useEffect(() => {
+    const minutes = getTimerMinutes();
+    if (minutes <= 0) {
+      setRemainingMs(null);
+      setSessionExpired(false);
+      try { localStorage.removeItem(TIMER_START_KEY); } catch {}
+      return;
+    }
+
+    const limit = minutes * 60 * 1000;
+
+    // Restore or set start time
+    let start: number;
+    try {
+      const saved = localStorage.getItem(TIMER_START_KEY);
+      if (saved) {
+        start = parseInt(saved, 10);
+      } else {
+        start = Date.now();
+        localStorage.setItem(TIMER_START_KEY, String(start));
+      }
+    } catch {
+      start = Date.now();
+    }
+
+    const initialLeft = limit - (Date.now() - start);
+    if (initialLeft <= 0) {
+      setSessionExpired(true);
+      setRemainingMs(0);
+      return;
+    }
+    setRemainingMs(initialLeft);
+    setSessionExpired(false);
+
+    const id = setInterval(() => {
+      const left = limit - (Date.now() - start);
+      if (left <= 0) {
+        setSessionExpired(true);
+        setRemainingMs(0);
+        clearInterval(id);
+      } else {
+        setRemainingMs(left);
+      }
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [timerVersion]);
+
+  // called from ParentDashboard when timer changes or is reset
+  const handleTimerRestart = useCallback(() => {
+    try { localStorage.setItem(TIMER_START_KEY, String(Date.now())); } catch {}
+    setTimerVersion((v) => v + 1);
+  }, []);
+
+  // --- Navigation with transitions ---
+  const navigateTo = useCallback((target: GameId | null) => {
+    if (transPhase !== 'idle') return;
+    pendingNavRef.current = target;
+    setTransPhase('fade-out');
+  }, [transPhase]);
+
+  const handleSelectGame = useCallback((id: GameId) => {
+    initAudio();
+    navigateTo(id);
+  }, [navigateTo]);
+
+  const handleBack = useCallback(() => {
+    navigateTo(null);
+  }, [navigateTo]);
+
+  const handleTransitionEnd = useCallback(() => {
+    if (transPhase === 'fade-out') {
+      if (pendingNavRef.current !== undefined) {
+        setCurrentGame(pendingNavRef.current);
+        if (pendingNavRef.current !== null) {
+          setGameKey((k) => k + 1);
+        }
+        pendingNavRef.current = undefined;
+      }
+      setTransPhase('fade-in');
+    } else if (transPhase === 'fade-in') {
+      setTransPhase('idle');
+    }
+  }, [transPhase]);
+
+  const overlayOpacity = transPhase === 'fade-out' ? 1 : 0;
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: '100vw',
+        height: '100dvh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#1a1a2e',
+        overflow: 'hidden',
+      }}
+    >
+      {sessionExpired ? (
+        <AllDoneScreen />
+      ) : (
+        <>
+          {currentGame === null && <HomeScreen onSelectGame={handleSelectGame} />}
+          {currentGame === 'egg-hunt' && <EggHunt key={gameKey} onBack={handleBack} />}
+          {currentGame === 'dino-path' && <DinoPath key={gameKey} onBack={handleBack} />}
+          {currentGame === 'spell-dino' && <SpellDino key={gameKey} onBack={handleBack} />}
+          {currentGame === 'volcano-escape' && <VolcanoEscape key={gameKey} onBack={handleBack} />}
+          {currentGame === 'dino-match' && <DinoMatch key={gameKey} onBack={handleBack} />}
+          {currentGame === 'collection' && <DinoCollection key={gameKey} onBack={handleBack} />}
+        </>
+      )}
+
+      {/* Transition overlay */}
+      <div
+        onTransitionEnd={handleTransitionEnd}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: '#1a1a2e',
+          opacity: overlayOpacity,
+          transition: 'opacity 300ms ease-in-out',
+          pointerEvents: transPhase !== 'idle' ? 'all' : 'none',
+          zIndex: 10,
+        }}
+      />
+
+      {/* Timer display */}
+      {remainingMs !== null && remainingMs > 0 && !sessionExpired && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 20,
+            background: remainingMs < 60000 ? 'rgba(200,50,50,0.6)' : 'rgba(0,0,0,0.35)',
+            border: `2px solid ${remainingMs < 60000 ? 'rgba(255,100,100,0.5)' : 'rgba(255,255,255,0.2)'}`,
+            borderRadius: 12,
+            color: '#fff',
+            fontSize: 14,
+            fontFamily: 'Fredoka, sans-serif',
+            padding: '6px 16px',
+            pointerEvents: 'none',
+            opacity: 0.8,
+          }}
+        >
+          {(() => {
+            const totalSec = Math.ceil(remainingMs / 1000);
+            const min = Math.floor(totalSec / 60);
+            const sec = totalSec % 60;
+            return `${min}:${sec.toString().padStart(2, '0')} left`;
+          })()}
+        </div>
+      )}
+
+      {/* Fullscreen button — long press opens parent dashboard */}
+      {document.fullscreenEnabled && (
+        <button
+          onPointerDown={handleFsPointerDown}
+          onPointerUp={handleFsPointerUp}
+          onPointerLeave={handleFsPointerLeave}
+          style={{
+            position: 'absolute',
+            top: 12,
+            left: 12,
+            zIndex: 20,
+            background: 'rgba(0,0,0,0.4)',
+            border: '2px solid rgba(255,255,255,0.3)',
+            borderRadius: 10,
+            color: '#fff',
+            fontSize: 18,
+            width: 40,
+            height: 40,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: 0.6,
+            transition: 'opacity 200ms',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
+          title={isFullscreen ? 'Exit fullscreen (hold for settings)' : 'Enter fullscreen (hold for settings)'}
+        >
+          {isFullscreen ? '✕' : '⛶'}
+        </button>
+      )}
+
+      {/* Fallback for no fullscreen: invisible long-press zone */}
+      {!document.fullscreenEnabled && (
+        <div
+          onPointerDown={handleFsPointerDown}
+          onPointerUp={() => {
+            if (longPressRef.current !== null) {
+              clearTimeout(longPressRef.current);
+              longPressRef.current = null;
+            }
+          }}
+          onPointerLeave={handleFsPointerLeave}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: 50,
+            height: 50,
+            zIndex: 20,
+            cursor: 'default',
+          }}
+        />
+      )}
+
+      {/* Parent dashboard overlay */}
+      {showParentDash && (
+        <ParentDashboard
+          onClose={() => setShowParentDash(false)}
+          onTimerRestart={handleTimerRestart}
+        />
+      )}
+    </div>
+  );
+}
+
+export default App;
