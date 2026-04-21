@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { loadStickers } from '../games/shared/stickers';
-import { isEasyMode, toggleEasyMode } from '../games/shared/easyMode';
-
-const TIMER_KEY = 'dinoLearn_timerMinutes';
-const PROGRESS_KEY = 'dinoLearn_progress';
+import { getDifficulty, setDifficulty, AGE_LABELS, DIFFICULTY_LABELS, DIFFICULTY_ORDER } from '../games/shared/difficulty';
+import type { Difficulty } from '../games/shared/difficulty';
+import { getVolume, setVolume, getMuted, setMuted } from '../games/shared/audio';
+import { getProfiles, getActiveProfile, setActiveProfile, addProfile, removeProfile, profileKey } from '../games/shared/profile';
 
 function getTimerMinutes(): number {
   try {
-    const saved = localStorage.getItem(TIMER_KEY);
+    const saved = localStorage.getItem(profileKey('timerMinutes'));
     if (saved) return Math.max(0, parseInt(saved, 10) || 0);
   } catch {}
   return 0;
@@ -15,13 +15,13 @@ function getTimerMinutes(): number {
 
 function setTimerMinutes(mins: number) {
   try {
-    localStorage.setItem(TIMER_KEY, String(Math.max(0, mins)));
+    localStorage.setItem(profileKey('timerMinutes'), String(Math.max(0, mins)));
   } catch {}
 }
 
 function getProgress(): Record<string, number> {
   try {
-    const raw = localStorage.getItem(PROGRESS_KEY);
+    const raw = localStorage.getItem(profileKey('progress'));
     if (raw) {
       const parsed = JSON.parse(raw);
       if (typeof parsed === 'object' && parsed !== null) return parsed;
@@ -32,9 +32,9 @@ function getProgress(): Record<string, number> {
 
 function resetProgress() {
   try {
-    localStorage.removeItem(PROGRESS_KEY);
-    localStorage.removeItem('dinoLearn_stickers');
-    localStorage.removeItem('dinoLearn_collection');
+    localStorage.removeItem(profileKey('progress'));
+    localStorage.removeItem(profileKey('stickers'));
+    localStorage.removeItem(profileKey('collection'));
   } catch {}
 }
 
@@ -45,19 +45,64 @@ const GAME_NAMES: Record<string, string> = {
   'volcano': 'Volcano Escape',
   'dino-match': 'Dino Match',
   'jungle-explorer': 'Jungle Explorer',
+  'dino-dungeon': 'Dino Dungeon',
 };
 
 export function ParentDashboard({ onClose, onTimerRestart }: { onClose: () => void; onTimerRestart: () => void }) {
   const [timer, setTimer] = useState(getTimerMinutes());
-  const [easyMode, setEasyMode] = useState(isEasyMode());
+  const [difficulty, setDiff] = useState<Difficulty>(getDifficulty());
   const [progress, setProgress] = useState(getProgress());
   const [stickers, setStickers] = useState(loadStickers());
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [volume, setVol] = useState(getVolume());
+  const [muted, setMut] = useState(getMuted());
+  const [profiles, setProfiles] = useState(getProfiles());
+  const [activeProfile, setActive] = useState(getActiveProfile());
+  const [newProfileName, setNewProfileName] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refreshProfileData = useCallback(() => {
+    setTimer(getTimerMinutes());
+    setDiff(getDifficulty());
     setProgress(getProgress());
     setStickers(loadStickers());
+    setShowResetConfirm(false);
   }, []);
+
+  useEffect(() => {
+    refreshProfileData();
+  }, [refreshProfileData]);
+
+  const handleSwitchProfile = useCallback((name: string) => {
+    setActiveProfile(name);
+    setActive(name);
+    setTimer(getTimerMinutes());
+    setDiff(getDifficulty());
+    setProgress(getProgress());
+    setStickers(loadStickers());
+    setShowResetConfirm(false);
+    onTimerRestart();
+  }, [onTimerRestart]);
+
+  const handleAddProfile = useCallback(() => {
+    const trimmed = newProfileName.trim();
+    if (!trimmed) return;
+    if (addProfile(trimmed)) {
+      setProfiles(getProfiles());
+      setNewProfileName('');
+      handleSwitchProfile(trimmed);
+    }
+  }, [newProfileName, handleSwitchProfile]);
+
+  const handleDeleteProfile = useCallback((name: string) => {
+    removeProfile(name);
+    const updated = getProfiles();
+    setProfiles(updated);
+    setShowDeleteConfirm(null);
+    if (activeProfile === name) {
+      handleSwitchProfile(updated[0]);
+    }
+  }, [activeProfile, handleSwitchProfile]);
 
   const handleTimerChange = useCallback((mins: number) => {
     setTimer(mins);
@@ -65,10 +110,21 @@ export function ParentDashboard({ onClose, onTimerRestart }: { onClose: () => vo
     onTimerRestart();
   }, [onTimerRestart]);
 
-  const handleEasyModeToggle = useCallback(() => {
-    const next = toggleEasyMode();
-    setEasyMode(next);
+  const handleDifficulty = useCallback((d: Difficulty) => {
+    setDifficulty(d);
+    setDiff(d);
   }, []);
+
+  const handleVolumeChange = useCallback((v: number) => {
+    setVol(v);
+    setVolume(v);
+  }, []);
+
+  const handleMuteToggle = useCallback(() => {
+    const next = !muted;
+    setMut(next);
+    setMuted(next);
+  }, [muted]);
 
   const handleReset = useCallback(() => {
     resetProgress();
@@ -122,6 +178,160 @@ export function ParentDashboard({ onClose, onTimerRestart }: { onClose: () => vo
           </button>
         </div>
 
+        {/* Profiles */}
+        <Section title="Player Profiles">
+          <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: '0 0 12px' }}>
+            Each player has their own progress, stickers, and settings.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            {profiles.map((name) => (
+              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  onClick={() => handleSwitchProfile(name)}
+                  style={{
+                    background: activeProfile === name ? '#4CAF50' : 'rgba(255,255,255,0.08)',
+                    border: activeProfile === name ? '2px solid #66BB6A' : '2px solid rgba(255,255,255,0.1)',
+                    borderRadius: 10,
+                    color: '#fff',
+                    fontSize: 14,
+                    padding: '8px 14px',
+                    cursor: 'pointer',
+                    fontFamily: 'Fredoka, sans-serif',
+                    fontWeight: activeProfile === name ? 'bold' : 'normal',
+                  }}
+                >
+                  {name}
+                </button>
+                {profiles.length > 1 && (
+                  showDeleteConfirm === name ? (
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button
+                        onClick={() => handleDeleteProfile(name)}
+                        style={{
+                          background: '#EF5350',
+                          border: 'none',
+                          borderRadius: 6,
+                          color: '#fff',
+                          fontSize: 11,
+                          padding: '4px 8px',
+                          cursor: 'pointer',
+                          fontFamily: 'Fredoka, sans-serif',
+                        }}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => setShowDeleteConfirm(null)}
+                        style={{
+                          background: 'rgba(255,255,255,0.08)',
+                          border: 'none',
+                          borderRadius: 6,
+                          color: '#fff',
+                          fontSize: 11,
+                          padding: '4px 8px',
+                          cursor: 'pointer',
+                          fontFamily: 'Fredoka, sans-serif',
+                        }}
+                      >
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowDeleteConfirm(name)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255,255,255,0.3)',
+                        fontSize: 14,
+                        cursor: 'pointer',
+                        padding: '2px 4px',
+                      }}
+                      title={`Remove ${name}`}
+                    >
+                      x
+                    </button>
+                  )
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="text"
+              value={newProfileName}
+              onChange={(e) => setNewProfileName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddProfile(); }}
+              placeholder="New player name"
+              maxLength={20}
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                border: '2px solid rgba(255,255,255,0.1)',
+                borderRadius: 10,
+                color: '#fff',
+                fontSize: 14,
+                padding: '8px 12px',
+                fontFamily: 'Fredoka, sans-serif',
+                outline: 'none',
+                width: 160,
+              }}
+            />
+            <button
+              onClick={handleAddProfile}
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                border: '2px solid rgba(255,255,255,0.15)',
+                borderRadius: 10,
+                color: '#fff',
+                fontSize: 14,
+                padding: '8px 14px',
+                cursor: 'pointer',
+                fontFamily: 'Fredoka, sans-serif',
+              }}
+            >
+              Add Player
+            </button>
+          </div>
+        </Section>
+
+        {/* Volume */}
+        <Section title="Sound">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <button
+              onClick={handleMuteToggle}
+              style={{
+                background: muted ? 'rgba(244,67,54,0.2)' : 'rgba(76,175,80,0.2)',
+                border: muted ? '2px solid rgba(244,67,54,0.4)' : '2px solid rgba(76,175,80,0.4)',
+                borderRadius: 10,
+                color: '#fff',
+                fontSize: 18,
+                padding: '6px 12px',
+                cursor: 'pointer',
+                fontFamily: 'Fredoka, sans-serif',
+                minWidth: 44,
+              }}
+            >
+              {muted ? '🔇' : '🔊'}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(volume * 100)}
+              onChange={(e) => handleVolumeChange(parseInt(e.target.value, 10) / 100)}
+              disabled={muted}
+              style={{
+                flex: 1,
+                accentColor: '#4CAF50',
+                opacity: muted ? 0.3 : 1,
+              }}
+            />
+            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, minWidth: 36, textAlign: 'right' }}>
+              {muted ? 'Off' : `${Math.round(volume * 100)}%`}
+            </span>
+          </div>
+        </Section>
+
         {/* Time Limit */}
         <Section title="Time Limit">
           <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: '0 0 12px' }}>
@@ -173,29 +383,49 @@ export function ParentDashboard({ onClose, onTimerRestart }: { onClose: () => vo
           </p>
         </Section>
 
-        {/* Easy Mode */}
-        <Section title="Easy Mode">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              onClick={handleEasyModeToggle}
-              style={{
-                background: easyMode ? '#4CAF50' : 'rgba(255,255,255,0.08)',
-                border: easyMode ? '2px solid #66BB6A' : '2px solid rgba(255,255,255,0.1)',
-                borderRadius: 10,
-                color: '#fff',
-                fontSize: 14,
-                padding: '8px 18px',
-                cursor: 'pointer',
-                fontFamily: 'Fredoka, sans-serif',
-                fontWeight: easyMode ? 'bold' : 'normal',
-              }}
-            >
-              {easyMode ? 'ON' : 'OFF'}
-            </button>
-            <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
-              Bigger hit areas, hints, and fewer cards in matching game
-            </span>
+        {/* Difficulty */}
+        <Section title="Difficulty">
+          <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: '0 0 12px' }}>
+            Choose the difficulty level that fits your child's age and skill.
+          </p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {DIFFICULTY_ORDER.map((d) => (
+              <button
+                key={d}
+                onClick={() => handleDifficulty(d)}
+                style={{
+                  flex: '1 1 140px',
+                  background: difficulty === d ? '#4CAF50' : 'rgba(255,255,255,0.08)',
+                  border: difficulty === d ? '2px solid #66BB6A' : '2px solid rgba(255,255,255,0.1)',
+                  borderRadius: 12,
+                  color: '#fff',
+                  padding: '12px 14px',
+                  cursor: 'pointer',
+                  fontFamily: 'Fredoka, sans-serif',
+                  textAlign: 'left',
+                }}
+              >
+                <div style={{
+                  fontSize: 16,
+                  fontWeight: 'bold',
+                  marginBottom: 2,
+                }}>
+                  {DIFFICULTY_LABELS[d]}
+                </div>
+                <div style={{
+                  fontSize: 12,
+                  color: difficulty === d ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)',
+                }}>
+                  {AGE_LABELS[d]}
+                </div>
+              </button>
+            ))}
           </div>
+          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, margin: '10px 0 0' }}>
+            {difficulty === 'easy' && 'Bigger hit areas, hints on every step, fewer cards, and slower pace.'}
+            {difficulty === 'medium' && 'Standard difficulty with normal pace and helpful visuals.'}
+            {difficulty === 'hard' && 'Faster pace, no hints, and trickier challenges.'}
+          </p>
         </Section>
 
         {/* Progress */}
@@ -307,7 +537,7 @@ export function ParentDashboard({ onClose, onTimerRestart }: { onClose: () => vo
             </div>
           )}
           <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, margin: '8px 0 0' }}>
-            This clears all stickers and game progress. Settings are kept.
+            This clears all stickers and game progress for {activeProfile}. Settings are kept.
           </p>
         </Section>
       </div>

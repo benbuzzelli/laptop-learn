@@ -116,6 +116,16 @@ import bonesBushUrl from './sprites/foliage/bones-bush.png';
 import fossilUrl from './sprites/foliage/fossil.png';
 import volcanoBushUrl from './sprites/foliage/volcano-bush.png';
 
+// Walk animation sprites
+import dinoWalk1 from './sprites/animations/dino-walk-1.png';
+import dinoWalk2 from './sprites/animations/dino-walk-2.png';
+import dinoWalk3 from './sprites/animations/dino-walk-3.png';
+import dinoWalk4 from './sprites/animations/dino-walk-4.png';
+import dinoWalk5 from './sprites/animations/dino-walk-5.png';
+import dinoWalk6 from './sprites/animations/dino-walk-6.png';
+import dinoWalk7 from './sprites/animations/dino-walk-7.png';
+import dinoWalk8 from './sprites/animations/dino-walk-8.png';
+
 // Misc sprites
 import mouseUrl from './sprites/mouse.png';
 import mouseClickUrl from './sprites/mouse-click.png';
@@ -303,6 +313,17 @@ export function getPalmImage(seed: number): HTMLImageElement {
   return loadUrl(PALM_URLS[idx]);
 }
 
+const WALK_FRAMES = [
+  dinoWalk1, dinoWalk2, dinoWalk3, dinoWalk4,
+  dinoWalk5, dinoWalk6, dinoWalk7, dinoWalk8,
+];
+
+export function getWalkDinoFrame(frame: number): HTMLImageElement {
+  return loadUrl(WALK_FRAMES[Math.abs(frame) % WALK_FRAMES.length]);
+}
+
+export const WALK_FRAME_COUNT = WALK_FRAMES.length;
+
 const STICKER_SPRITE_MAP: Record<string, string> = {
   'egg-hunt-1': egg1,
   'egg-hunt-5': egg1Grown,
@@ -314,6 +335,8 @@ const STICKER_SPRITE_MAP: Record<string, string> = {
   'volcano-3': raptorP0,
   'dino-match-1': stegP0,
   'dino-match-3': ankyP0,
+  'dino-dungeon-1': raptorP0,
+  'dino-dungeon-3': spinoP0,
 };
 
 export function getStickerImage(stickerId: string): HTMLImageElement | null {

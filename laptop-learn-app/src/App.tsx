@@ -7,13 +7,12 @@ import { SpellDino } from './games/spell-dino/SpellDino';
 import { VolcanoEscape } from './games/volcano-escape/VolcanoEscape';
 import { DinoMatch } from './games/dino-match/DinoMatch';
 import { JungleExplorer } from './games/jungle-explorer/JungleExplorer';
+import { DinoDungeon } from './games/dino-dungeon/DinoDungeon';
 import { DinoCollection } from './components/DinoCollection';
 import { ParentDashboard } from './components/ParentDashboard';
 import { initAudio } from './games/shared/audio';
+import { profileKey } from './games/shared/profile';
 import type { GameId } from './games/shared/types';
-
-const TIMER_KEY = 'dinoLearn_timerMinutes';
-const TIMER_START_KEY = 'dinoLearn_timerStart';
 
 function getTimerMinutes(): number {
   const params = new URLSearchParams(window.location.search);
@@ -21,12 +20,12 @@ function getTimerMinutes(): number {
   if (fromUrl) {
     const mins = parseInt(fromUrl, 10);
     if (mins > 0) {
-      try { localStorage.setItem(TIMER_KEY, String(mins)); } catch {}
+      try { localStorage.setItem(profileKey('timerMinutes'), String(mins)); } catch {}
       return mins;
     }
   }
   try {
-    const saved = localStorage.getItem(TIMER_KEY);
+    const saved = localStorage.getItem(profileKey('timerMinutes'));
     if (saved) return Math.max(0, parseInt(saved, 10) || 0);
   } catch {}
   return 0;
@@ -130,7 +129,7 @@ function App() {
     if (minutes <= 0) {
       setRemainingMs(null);
       setSessionExpired(false);
-      try { localStorage.removeItem(TIMER_START_KEY); } catch {}
+      try { localStorage.removeItem(profileKey('timerStart')); } catch {}
       return;
     }
 
@@ -139,12 +138,12 @@ function App() {
     // Restore or set start time
     let start: number;
     try {
-      const saved = localStorage.getItem(TIMER_START_KEY);
+      const saved = localStorage.getItem(profileKey('timerStart'));
       if (saved) {
         start = parseInt(saved, 10);
       } else {
         start = Date.now();
-        localStorage.setItem(TIMER_START_KEY, String(start));
+        localStorage.setItem(profileKey('timerStart'), String(start));
       }
     } catch {
       start = Date.now();
@@ -175,7 +174,7 @@ function App() {
 
   // called from ParentDashboard when timer changes or is reset
   const handleTimerRestart = useCallback(() => {
-    try { localStorage.setItem(TIMER_START_KEY, String(Date.now())); } catch {}
+    try { localStorage.setItem(profileKey('timerStart'), String(Date.now())); } catch {}
     setTimerVersion((v) => v + 1);
   }, []);
 
@@ -236,6 +235,7 @@ function App() {
           {currentGame === 'volcano-escape' && <VolcanoEscape key={gameKey} onBack={handleBack} />}
           {currentGame === 'dino-match' && <DinoMatch key={gameKey} onBack={handleBack} />}
           {currentGame === 'jungle-explorer' && <JungleExplorer key={gameKey} onBack={handleBack} />}
+          {currentGame === 'dino-dungeon' && <DinoDungeon key={gameKey} onBack={handleBack} />}
           {currentGame === 'collection' && <DinoCollection key={gameKey} onBack={handleBack} />}
         </>
       )}

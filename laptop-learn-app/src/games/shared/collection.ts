@@ -1,6 +1,5 @@
 import type { DinoSpecies } from './draw';
-
-const KEY = 'dinoLearn_collection';
+import { profileKey } from './profile';
 
 export interface DinoRecord {
   species: DinoSpecies;
@@ -12,7 +11,7 @@ export interface DinoRecord {
 
 function loadRaw(): DinoRecord[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(profileKey('collection'));
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
@@ -23,7 +22,7 @@ function loadRaw(): DinoRecord[] {
 
 function save(records: DinoRecord[]) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(records));
+    localStorage.setItem(profileKey('collection'), JSON.stringify(records));
   } catch {}
 }
 

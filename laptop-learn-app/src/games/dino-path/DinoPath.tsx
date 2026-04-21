@@ -4,6 +4,8 @@ import { spawnCelebration, updateParticles, drawParticles } from '../shared/part
 import { playStep, playCelebration, playSticker } from '../shared/audio';
 import { earnSticker, trackProgress } from '../shared/stickers';
 import { isEasyMode, toggleEasyMode } from '../shared/easyMode';
+import { getDifficulty } from '../shared/difficulty';
+import type { Difficulty } from '../shared/difficulty';
 import { trackDinoEncounter } from '../shared/collection';
 import { useGameCanvas } from '../shared/useGameCanvas';
 import type { Particle, Point } from '../shared/types';
@@ -34,18 +36,91 @@ const PATHS: Point[][] = [
   })),
 ];
 
+interface Decoy {
+  forkIdx: number;    // main-path dot where the decoy branches off
+  dots: Point[];      // decoy dots; last one is the dead-end
+}
+
+interface Level {
+  path: Point[];
+  decoy?: Decoy;
+}
+
+// Hard paths: longer, twistier, with one decoy branch each
+const HARD_LEVELS: Level[] = [
+  // long S with upward decoy
+  {
+    path: Array.from({ length: 18 }, (_, i) => ({
+      x: 70 + i * 40,
+      y: 310 + Math.sin(i * 0.5) * 90,
+    })),
+    decoy: {
+      forkIdx: 6,
+      dots: [
+        { x: 330, y: 210 },
+        { x: 370, y: 160 },
+        { x: 420, y: 120 },
+        { x: 470, y: 90 },
+      ],
+    },
+  },
+  // gentle curve with downward decoy
+  {
+    path: Array.from({ length: 16 }, (_, i) => ({
+      x: 90 + i * 45,
+      y: 280 + Math.sin(i * 0.4) * 70,
+    })),
+    decoy: {
+      forkIdx: 9,
+      dots: [
+        { x: 545, y: 410 },
+        { x: 555, y: 465 },
+        { x: 550, y: 520 },
+      ],
+    },
+  },
+  // zigzag with side decoy
+  {
+    path: Array.from({ length: 15 }, (_, i) => ({
+      x: 90 + i * 45,
+      y: 260 + (i % 2 === 0 ? 0 : 80),
+    })),
+    decoy: {
+      forkIdx: 5,
+      dots: [
+        { x: 330, y: 200 },
+        { x: 320, y: 145 },
+        { x: 300, y: 100 },
+      ],
+    },
+  },
+];
+
+function getLevel(level: number, difficulty: Difficulty): Level {
+  if (difficulty === 'hard') {
+    return HARD_LEVELS[level % HARD_LEVELS.length];
+  }
+  return { path: PATHS[level % PATHS.length] };
+}
+
 function getPath(level: number): Point[] {
   return PATHS[level % PATHS.length];
 }
 
 export function DinoPath({ onBack }: { onBack: () => void }) {
+  const initialDiff = getDifficulty();
+  const initialLevel = getLevel(0, initialDiff);
   const stateRef = useRef({
-    path: getPath(0),
+    levelData: initialLevel,
+    path: initialLevel.path,
+    decoy: initialLevel.decoy,
     nextDot: 1,
+    onDecoy: false,
+    decoyStep: 0,
     particles: [] as Particle[],
     completed: 0,
     level: 0,
-    dinoPos: { x: getPath(0)[0].x, y: getPath(0)[0].y },
+    dinoPos: { x: initialLevel.path[0].x, y: initialLevel.path[0].y },
     trail: [] as Point[],
     celebrating: 0,
     stickerPopup: '',
@@ -53,6 +128,7 @@ export function DinoPath({ onBack }: { onBack: () => void }) {
     mouseDown: false,
     bgGrad: null as CanvasGradient | null,
     easyMode: isEasyMode(),
+    difficulty: initialDiff,
   });
 
   const onMouseDown = useCallback(() => { stateRef.current.mouseDown = true; }, []);
@@ -71,12 +147,42 @@ export function DinoPath({ onBack }: { onBack: () => void }) {
       s.particles = updateParticles(s.particles, dt);
 
       if (s.mouseDown && s.celebrating <= 0) {
-        const target = s.path[s.nextDot];
-        if (target) {
+        const hitR = s.easyMode ? 65 : 40;
+
+        const tryHit = (target: Point) => {
           const dx = mouse.mouseX - target.x;
           const dy = mouse.mouseY - target.y;
-          const hitR = s.easyMode ? 65 : 40;
-          if (dx * dx + dy * dy < hitR * hitR) {
+          return dx * dx + dy * dy < hitR * hitR;
+        };
+
+        if (s.onDecoy && s.decoy) {
+          // travelling along the decoy
+          const decoyDots = s.decoy.dots;
+          if (s.decoyStep < decoyDots.length) {
+            const target = decoyDots[s.decoyStep];
+            if (tryHit(target)) {
+              playStep();
+              s.particles.push(...spawnCelebration(target.x, target.y, 3));
+              s.dinoPos = { x: target.x, y: target.y };
+              s.trail.push({ x: target.x, y: target.y });
+              s.decoyStep++;
+            }
+          } else {
+            // at the dead-end — tap the fork dot to return
+            const forkDot = s.path[s.decoy.forkIdx];
+            if (tryHit(forkDot)) {
+              playStep();
+              s.particles.push(...spawnCelebration(forkDot.x, forkDot.y, 4));
+              s.dinoPos = { x: forkDot.x, y: forkDot.y };
+              s.trail.push({ x: forkDot.x, y: forkDot.y });
+              s.onDecoy = false;
+              s.decoyStep = 0;
+            }
+          }
+        } else {
+          // on main path
+          const target = s.path[s.nextDot];
+          if (target && tryHit(target)) {
             playStep();
             s.particles.push(...spawnCelebration(target.x, target.y, 4));
             s.dinoPos = { x: target.x, y: target.y };
@@ -105,12 +211,28 @@ export function DinoPath({ onBack }: { onBack: () => void }) {
 
               safeTimeout(() => {
                 s.level++;
-                s.path = getPath(s.level);
+                const next = getLevel(s.level, s.difficulty);
+                s.levelData = next;
+                s.path = next.path;
+                s.decoy = next.decoy;
                 s.nextDot = 1;
-                s.dinoPos = { x: s.path[0].x, y: s.path[0].y };
-                s.trail = [{ x: s.path[0].x, y: s.path[0].y }];
+                s.onDecoy = false;
+                s.decoyStep = 0;
+                s.dinoPos = { x: next.path[0].x, y: next.path[0].y };
+                s.trail = [{ x: next.path[0].x, y: next.path[0].y }];
                 s.celebrating = 0;
               }, 2200);
+            }
+          } else if (s.decoy && s.nextDot === s.decoy.forkIdx + 1) {
+            // at the fork — the decoy entry dot is also hittable
+            const decoyEntry = s.decoy.dots[0];
+            if (tryHit(decoyEntry)) {
+              playStep();
+              s.particles.push(...spawnCelebration(decoyEntry.x, decoyEntry.y, 3));
+              s.dinoPos = { x: decoyEntry.x, y: decoyEntry.y };
+              s.trail.push({ x: decoyEntry.x, y: decoyEntry.y });
+              s.onDecoy = true;
+              s.decoyStep = 1;
             }
           }
         }
@@ -267,6 +389,80 @@ export function DinoPath({ onBack }: { onBack: () => void }) {
         }
       }
 
+      // decoy branch rendering (hard mode)
+      if (s.decoy) {
+        const decoyDots = s.decoy.dots;
+        const fork = s.path[s.decoy.forkIdx];
+
+        // dotted line from fork through decoy
+        ctx.setLineDash([6, 10]);
+        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(fork.x, fork.y);
+        for (const d of decoyDots) ctx.lineTo(d.x, d.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        for (let i = 0; i < decoyDots.length; i++) {
+          const d = decoyDots[i];
+          const isLast = i === decoyDots.length - 1;
+          const isDone = s.onDecoy && i < s.decoyStep;
+          const isNextDecoy = s.onDecoy && i === s.decoyStep;
+          const isEntryNext = !s.onDecoy && i === 0 && s.nextDot === s.decoy.forkIdx + 1;
+
+          if (isDone) {
+            ctx.fillStyle = '#BDBDBD';
+            ctx.beginPath();
+            ctx.arc(d.x, d.y, 7, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (isNextDecoy || isEntryNext) {
+            const pulse = 1 + Math.sin(mouse.time * 4) * 0.3;
+            ctx.fillStyle = '#FFA726';
+            ctx.beginPath();
+            ctx.arc(d.x, d.y, 18 * pulse, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(d.x, d.y, 8 * pulse, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            ctx.fillStyle = 'rgba(0,0,0,0.12)';
+            ctx.beginPath();
+            ctx.arc(d.x, d.y, 9, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          // dead-end marker on the last decoy dot
+          if (isLast) {
+            const pulseDE = s.onDecoy && s.decoyStep >= decoyDots.length
+              ? 1 + Math.sin(mouse.time * 5) * 0.15
+              : 1;
+            ctx.save();
+            ctx.shadowColor = 'rgba(244,67,54,0.5)';
+            ctx.shadowBlur = s.onDecoy && s.decoyStep >= decoyDots.length ? 14 : 6;
+            ctx.font = `${Math.round(22 * pulseDE)}px serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText('❌', d.x, d.y - 22);
+            ctx.restore();
+          }
+        }
+
+        // helper text when at the dead-end
+        if (s.onDecoy && s.decoyStep >= decoyDots.length) {
+          ctx.save();
+          ctx.font = 'bold 14px Fredoka, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+          ctx.lineWidth = 3;
+          ctx.lineJoin = 'round';
+          ctx.strokeText('Dead end — go back!', fork.x, fork.y - 28);
+          ctx.fillStyle = '#FFCC80';
+          ctx.fillText('Dead end — go back!', fork.x, fork.y - 28);
+          ctx.restore();
+        }
+      }
+
       // easy mode: pulsing guide line + "Go here!" on next dot
       if (s.easyMode && s.nextDot < s.path.length && s.celebrating <= 0) {
         const target = s.path[s.nextDot];
@@ -343,7 +539,19 @@ export function DinoPath({ onBack }: { onBack: () => void }) {
       const mx = (clientX - rect.left) * (W / rect.width);
       const my = (clientY - rect.top) * (H / rect.height);
       if (mx > 100 && mx < 180 && my > 14 && my < 48) {
-        stateRef.current.easyMode = toggleEasyMode();
+        const s = stateRef.current;
+        s.easyMode = toggleEasyMode();
+        s.difficulty = getDifficulty();
+        // refresh current level layout in case difficulty crossed the hard boundary
+        const refreshed = getLevel(s.level, s.difficulty);
+        s.levelData = refreshed;
+        s.path = refreshed.path;
+        s.decoy = refreshed.decoy;
+        s.nextDot = 1;
+        s.onDecoy = false;
+        s.decoyStep = 0;
+        s.dinoPos = { x: refreshed.path[0].x, y: refreshed.path[0].y };
+        s.trail = [{ x: refreshed.path[0].x, y: refreshed.path[0].y }];
         return;
       }
       if (mx > W - 110 && mx < W && my > 10 && my < 54) {

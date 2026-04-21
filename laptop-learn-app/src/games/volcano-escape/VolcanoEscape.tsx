@@ -1,10 +1,13 @@
 import { useRef, useCallback } from 'react';
-import { drawDino, drawCustomCursor, drawBackButton, drawStickerPopup, drawScore, drawInstructions, drawHintButton, drawKeyboardOverlay, drawEasyModeButton } from '../shared/draw';
+import { drawWalkDino, drawCustomCursor, drawBackButton, drawStickerPopup, drawScore, drawInstructions, drawHintButton, drawKeyboardOverlay, drawEasyModeButton } from '../shared/draw';
+import type { WalkDirection } from '../shared/draw';
 import { getVolcanoImage, getGrassTileImage, getWallTileImage, getArrowImage, getFinishImage } from '../shared/dino-svgs';
 import { spawnCelebration, updateParticles, drawParticles } from '../shared/particles';
 import { playStep, playCelebration, playSticker } from '../shared/audio';
 import { earnSticker, trackProgress } from '../shared/stickers';
 import { isEasyMode, toggleEasyMode } from '../shared/easyMode';
+import { getDifficulty } from '../shared/difficulty';
+import type { Difficulty } from '../shared/difficulty';
 import { trackDinoEncounter } from '../shared/collection';
 import { useGameCanvas } from '../shared/useGameCanvas';
 import type { Particle, Point } from '../shared/types';
@@ -85,7 +88,7 @@ function bestDirection(grid: Cell[][], pr: number, pc: number): string {
   return bestKey;
 }
 
-function generateMaze(_level: number): Cell[][] {
+function generateMaze(_level: number, difficulty: Difficulty = 'medium'): Cell[][] {
   const grid: Cell[][] = Array.from({ length: ROWS }, () =>
     Array.from({ length: COLS }, () => 'wall' as Cell),
   );
@@ -115,15 +118,18 @@ function generateMaze(_level: number): Cell[][] {
     stack.push([r + dr, c + dc]);
   }
 
-  // widen passages for toddlers
-  for (let r = 1; r < ROWS - 1; r++) {
-    for (let c = 1; c < COLS - 1; c++) {
-      if (grid[r][c] === 'empty') {
-        if (r + 1 < ROWS - 1 && grid[r + 1][c] === 'wall' && Math.random() < 0.5) {
-          grid[r + 1][c] = 'empty';
-        }
-        if (c + 1 < COLS - 1 && grid[r][c + 1] === 'wall' && Math.random() < 0.5) {
-          grid[r][c + 1] = 'empty';
+  // widen passages for toddlers (easy/medium only — hard keeps tight corridors)
+  if (difficulty !== 'hard') {
+    const widenChance = difficulty === 'easy' ? 0.6 : 0.5;
+    for (let r = 1; r < ROWS - 1; r++) {
+      for (let c = 1; c < COLS - 1; c++) {
+        if (grid[r][c] === 'empty') {
+          if (r + 1 < ROWS - 1 && grid[r + 1][c] === 'wall' && Math.random() < widenChance) {
+            grid[r + 1][c] = 'empty';
+          }
+          if (c + 1 < COLS - 1 && grid[r][c + 1] === 'wall' && Math.random() < widenChance) {
+            grid[r][c + 1] = 'empty';
+          }
         }
       }
     }
@@ -151,7 +157,8 @@ function generateMaze(_level: number): Cell[][] {
 }
 
 export function VolcanoEscape({ onBack }: { onBack: () => void }) {
-  const initialGrid = generateMaze(0);
+  const initialDifficulty = getDifficulty();
+  const initialGrid = generateMaze(0, initialDifficulty);
   const stateRef = useRef({
     grid: initialGrid,
     playerR: 1,
@@ -167,6 +174,8 @@ export function VolcanoEscape({ onBack }: { onBack: () => void }) {
     keysHeld: new Set<string>(),
     showHint: false,
     easyMode: isEasyMode(),
+    difficulty: initialDifficulty as Difficulty,
+    facing: 'down' as WalkDirection,
   });
 
   const tryMove = useCallback((dr: number, dc: number, key?: string) => {
@@ -186,6 +195,10 @@ export function VolcanoEscape({ onBack }: { onBack: () => void }) {
 
     s.playerR = nr;
     s.playerC = nc;
+    if (dr === -1) s.facing = 'down';
+    else if (dr === 1) s.facing = 'down';
+    else if (dc === -1) s.facing = 'left';
+    else if (dc === 1) s.facing = 'right';
     playStep();
 
     const px = nc * TILE + TILE / 2;
@@ -256,9 +269,10 @@ export function VolcanoEscape({ onBack }: { onBack: () => void }) {
         s.celebrating -= dt;
         if (s.celebrating <= 0) {
           s.level++;
-          s.grid = generateMaze(s.level);
+          s.grid = generateMaze(s.level, s.difficulty);
           s.playerR = 1;
           s.playerC = 1;
+          s.facing = 'down';
           s.trail = [{ x: 1 * TILE + TILE / 2, y: 1 * TILE + TILE / 2 }];
         }
       }
@@ -331,30 +345,32 @@ export function VolcanoEscape({ onBack }: { onBack: () => void }) {
         }
       }
 
-      // trail — directional footprint sprites
-      for (let i = 0; i < s.trail.length - 1; i++) {
-        const cur = s.trail[i];
-        const next = s.trail[i + 1];
-        const dx = next.x - cur.x;
-        const dy = next.y - cur.y;
-        let dir: string;
-        if (Math.abs(dx) > Math.abs(dy)) {
-          dir = dx > 0 ? 'ArrowRight' : 'ArrowLeft';
-        } else {
-          dir = dy > 0 ? 'ArrowDown' : 'ArrowUp';
-        }
-        const arrowImg = getArrowImage(dir);
-        if (arrowImg && arrowImg.complete && arrowImg.naturalWidth > 0) {
-          const tx = cur.x - TILE / 2;
-          const ty = cur.y - TILE / 2;
-          ctx.save();
-          ctx.globalAlpha = 0.5;
-          ctx.drawImage(arrowImg, tx, ty, TILE, TILE);
-          ctx.restore();
+      // trail — directional footprint sprites (hidden in hard mode)
+      if (s.difficulty !== 'hard') {
+        for (let i = 0; i < s.trail.length - 1; i++) {
+          const cur = s.trail[i];
+          const next = s.trail[i + 1];
+          const dx = next.x - cur.x;
+          const dy = next.y - cur.y;
+          let dir: string;
+          if (Math.abs(dx) > Math.abs(dy)) {
+            dir = dx > 0 ? 'ArrowRight' : 'ArrowLeft';
+          } else {
+            dir = dy > 0 ? 'ArrowDown' : 'ArrowUp';
+          }
+          const arrowImg = getArrowImage(dir);
+          if (arrowImg && arrowImg.complete && arrowImg.naturalWidth > 0) {
+            const tx = cur.x - TILE / 2;
+            const ty = cur.y - TILE / 2;
+            ctx.save();
+            ctx.globalAlpha = 0.5;
+            ctx.drawImage(arrowImg, tx, ty, TILE, TILE);
+            ctx.restore();
+          }
         }
       }
 
-      // arrow key hints — using arrow sprites
+      // arrow key hints — hidden in hard mode unless the hint button is toggled
       const suggested = bestDirection(s.grid, s.playerR, s.playerC);
       const hints = [
         { arrowKey: 'ArrowUp', dr: -1, dc: 0 },
@@ -362,7 +378,8 @@ export function VolcanoEscape({ onBack }: { onBack: () => void }) {
         { arrowKey: 'ArrowLeft', dr: 0, dc: -1 },
         { arrowKey: 'ArrowRight', dr: 0, dc: 1 },
       ];
-      for (const h of hints) {
+      const showArrowHints = s.difficulty !== 'hard' || s.showHint;
+      for (const h of (showArrowHints ? hints : [])) {
         const nr = s.playerR + h.dr;
         const nc = s.playerC + h.dc;
         if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && s.grid[nr][nc] !== 'wall') {
@@ -401,8 +418,7 @@ export function VolcanoEscape({ onBack }: { onBack: () => void }) {
       // player dino
       const px = s.playerC * TILE + TILE / 2;
       const py = s.playerR * TILE + TILE / 2;
-      const bounce = Math.sin(mouse.time * 4) * 2;
-      drawDino(ctx, px, py + bounce - 5, 38, '#4CAF50', false, 'rex');
+      drawWalkDino(ctx, px, py - 5, 34, s.facing, mouse.time);
 
       drawParticles(ctx, s.particles);
 
@@ -457,7 +473,9 @@ export function VolcanoEscape({ onBack }: { onBack: () => void }) {
       const mx = (clientX - rect.left) * (W / rect.width);
       const my = (clientY - rect.top) * (H / rect.height);
       if (mx > 100 && mx < 180 && my > 14 && my < 48) {
-        stateRef.current.easyMode = toggleEasyMode();
+        const s = stateRef.current;
+        s.easyMode = toggleEasyMode();
+        s.difficulty = getDifficulty();
         return;
       }
       if (mx > W - 160 && mx < W - 116 && my > 10 && my < 54) {

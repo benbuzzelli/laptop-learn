@@ -1,19 +1,12 @@
-const KEY = 'dinoLearn_easyMode';
+import { getDifficulty, setDifficulty } from './difficulty';
 
 export function isEasyMode(): boolean {
-  try {
-    return localStorage.getItem(KEY) === '1';
-  } catch {
-    return false;
-  }
+  return getDifficulty() === 'easy';
 }
 
 export function toggleEasyMode(): boolean {
-  const next = !isEasyMode();
-  try {
-    localStorage.setItem(KEY, next ? '1' : '0');
-  } catch {
-    // ignore
-  }
-  return next;
+  const current = getDifficulty();
+  const next = current === 'easy' ? 'medium' : 'easy';
+  setDifficulty(next);
+  return next === 'easy';
 }

@@ -6,31 +6,44 @@ import { spawnCelebration, updateParticles, drawParticles } from '../shared/part
 import { playFlip, playMatch, playMismatch, playCelebration, playSticker } from '../shared/audio';
 import { earnSticker, trackProgress } from '../shared/stickers';
 import { isEasyMode, toggleEasyMode } from '../shared/easyMode';
+import { getDifficulty } from '../shared/difficulty';
+import type { Difficulty } from '../shared/difficulty';
 import { trackDinoEncounter } from '../shared/collection';
 import { useGameCanvas } from '../shared/useGameCanvas';
 import type { Particle } from '../shared/types';
 
 const W = 800;
 const H = 600;
-const CARD_W = 120;
-const CARD_H = 140;
-const GAP = 16;
+const GAP = 14;
 
 interface GridLayout {
   cols: number;
   rows: number;
+  cardW: number;
+  cardH: number;
   gridX: number;
   gridY: number;
 }
 
-function getLayout(easy: boolean): GridLayout {
-  const cols = easy ? 2 : 4;
-  const rows = easy ? 2 : 3;
-  const gridW = cols * CARD_W + (cols - 1) * GAP;
-  const gridH = rows * CARD_H + (rows - 1) * GAP;
+function getLayout(diff: Difficulty): GridLayout {
+  let cols: number;
+  let rows: number;
+  let cardW: number;
+  let cardH: number;
+  if (diff === 'easy') {
+    cols = 2; rows = 2; cardW = 120; cardH = 140;
+  } else if (diff === 'medium') {
+    cols = 4; rows = 3; cardW = 120; cardH = 140;
+  } else {
+    cols = 4; rows = 4; cardW = 100; cardH = 115;
+  }
+  const gridW = cols * cardW + (cols - 1) * GAP;
+  const gridH = rows * cardH + (rows - 1) * GAP;
   return {
     cols,
     rows,
+    cardW,
+    cardH,
     gridX: (W - gridW) / 2,
     gridY: (H - gridH) / 2 + 20,
   };
@@ -68,8 +81,8 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function createCards(easy: boolean): Card[] {
-  const layout = getLayout(easy);
+function createCards(diff: Difficulty): Card[] {
+  const layout = getLayout(diff);
   const numPairs = (layout.cols * layout.rows) / 2;
   const picked = shuffle(DINO_POOL).slice(0, numPairs);
   const pairs = [...picked, ...picked];
@@ -82,29 +95,33 @@ function createCards(easy: boolean): Card[] {
   }));
 }
 
+const HARD_PREVIEW_SEC = 2.5;
+
 function getCardPos(index: number, layout: GridLayout): { x: number; y: number } {
   const col = index % layout.cols;
   const row = Math.floor(index / layout.cols);
   return {
-    x: layout.gridX + col * (CARD_W + GAP),
-    y: layout.gridY + row * (CARD_H + GAP),
+    x: layout.gridX + col * (layout.cardW + GAP),
+    y: layout.gridY + row * (layout.cardH + GAP),
   };
 }
 
 export function DinoMatch({ onBack }: { onBack: () => void }) {
-  const initialEasy = isEasyMode();
+  const initialDiff = getDifficulty();
   const stateRef = useRef({
-    cards: createCards(initialEasy),
+    cards: createCards(initialDiff),
     flippedIndices: [] as number[],
     particles: [] as Particle[],
     matched: 0,
-    totalPairs: getLayout(initialEasy).cols * getLayout(initialEasy).rows / 2,
+    totalPairs: getLayout(initialDiff).cols * getLayout(initialDiff).rows / 2,
     lockTimer: 0,
     celebrating: 0,
     stickerPopup: '',
     stickerPopupTimer: 0,
     bgGrad: null as CanvasGradient | null,
-    easyMode: initialEasy,
+    difficulty: initialDiff,
+    easyMode: initialDiff === 'easy',
+    previewTimer: initialDiff === 'hard' ? HARD_PREVIEW_SEC : 0,
   });
 
   const { canvasRef } = useGameCanvas({
@@ -116,11 +133,21 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
 
       if (s.stickerPopupTimer > 0) s.stickerPopupTimer -= dt;
       s.particles = updateParticles(s.particles, dt);
-      const layout = getLayout(s.easyMode);
+      const layout = getLayout(s.difficulty);
 
-      // flip animations
+      // hard-mode preview countdown
+      if (s.previewTimer > 0) {
+        s.previewTimer -= dt;
+        if (s.previewTimer <= 0) {
+          s.previewTimer = 0;
+        }
+      }
+
+      // flip animations — during preview, all unmatched cards act flipped
+      const previewing = s.previewTimer > 0;
       for (const card of s.cards) {
-        if (card.flipped || card.matched) {
+        const showing = previewing || card.flipped || card.matched;
+        if (showing) {
           card.flipAnim = Math.min(1, card.flipAnim + dt * 5);
         } else {
           card.flipAnim = Math.max(0, card.flipAnim - dt * 5);
@@ -142,10 +169,11 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
       if (s.celebrating > 0) {
         s.celebrating -= dt;
         if (s.celebrating <= 0) {
-          s.cards = createCards(s.easyMode);
+          s.cards = createCards(s.difficulty);
           s.flippedIndices = [];
           s.matched = 0;
-          s.totalPairs = getLayout(s.easyMode).cols * getLayout(s.easyMode).rows / 2;
+          s.totalPairs = getLayout(s.difficulty).cols * getLayout(s.difficulty).rows / 2;
+          s.previewTimer = s.difficulty === 'hard' ? HARD_PREVIEW_SEC : 0;
         }
       }
 
@@ -201,6 +229,8 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
       ctx.fillText('Find the matching dinos!', W / 2, 35);
 
       // draw cards
+      const cw = layout.cardW;
+      const ch = layout.cardH;
       for (let i = 0; i < s.cards.length; i++) {
         const card = s.cards[i];
         const pos = getCardPos(i, layout);
@@ -210,40 +240,40 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
         const scaleX = Math.abs(Math.cos(card.flipAnim * Math.PI));
 
         ctx.save();
-        ctx.translate(x + CARD_W / 2, y + CARD_H / 2);
+        ctx.translate(x + cw / 2, y + ch / 2);
         ctx.scale(Math.max(0.02, scaleX), 1);
-        ctx.translate(-(x + CARD_W / 2), -(y + CARD_H / 2));
+        ctx.translate(-(x + cw / 2), -(y + ch / 2));
 
         // shadow
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.beginPath();
-        ctx.roundRect(x + 4, y + 6, CARD_W, CARD_H, 14);
+        ctx.roundRect(x + 4, y + 6, cw, ch, 14);
         ctx.fill();
 
         if (showFace) {
           // face up — white card with dino
           ctx.fillStyle = card.matched ? '#E8F5E9' : '#FFFFFF';
           ctx.beginPath();
-          ctx.roundRect(x, y, CARD_W, CARD_H, 14);
+          ctx.roundRect(x, y, cw, ch, 14);
           ctx.fill();
 
           ctx.strokeStyle = card.matched ? '#4CAF50' : 'rgba(0,0,0,0.1)';
           ctx.lineWidth = card.matched ? 3 : 1;
           ctx.beginPath();
-          ctx.roundRect(x, y, CARD_W, CARD_H, 14);
+          ctx.roundRect(x, y, cw, ch, 14);
           ctx.stroke();
 
           // dino sprite
-          const dinoSize = 55;
+          const dinoSize = Math.round(cw * 0.46);
           const bounce = card.matched ? Math.sin(mouse.time * 4) * 3 : 0;
           const pose = 0;
-          drawDino(ctx, x + CARD_W / 2, y + CARD_H / 2 - 10 + bounce, dinoSize, '#4CAF50', false, card.species, pose, card.version);
+          drawDino(ctx, x + cw / 2, y + ch / 2 - 10 + bounce, dinoSize, '#4CAF50', false, card.species, pose, card.version);
 
           // label
           ctx.fillStyle = 'rgba(0,0,0,0.5)';
           ctx.font = '12px Fredoka, sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText(card.species.charAt(0).toUpperCase() + card.species.slice(1), x + CARD_W / 2, y + CARD_H - 12);
+          ctx.fillText(card.species.charAt(0).toUpperCase() + card.species.slice(1), x + cw / 2, y + ch - 12);
 
           if (card.matched) {
             ctx.save();
@@ -252,34 +282,34 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
             ctx.strokeStyle = '#4CAF50';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.roundRect(x, y, CARD_W, CARD_H, 14);
+            ctx.roundRect(x, y, cw, ch, 14);
             ctx.stroke();
             ctx.restore();
           }
         } else {
           // face down — egg pattern back
-          const backGrad = ctx.createLinearGradient(x, y, x, y + CARD_H);
+          const backGrad = ctx.createLinearGradient(x, y, x, y + ch);
           backGrad.addColorStop(0, '#5C6BC0');
           backGrad.addColorStop(1, '#3949AB');
           ctx.fillStyle = backGrad;
           ctx.beginPath();
-          ctx.roundRect(x, y, CARD_W, CARD_H, 14);
+          ctx.roundRect(x, y, cw, ch, 14);
           ctx.fill();
 
           ctx.strokeStyle = 'rgba(255,255,255,0.2)';
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.roundRect(x + 4, y + 4, CARD_W - 8, CARD_H - 8, 10);
+          ctx.roundRect(x + 4, y + 4, cw - 8, ch - 8, 10);
           ctx.stroke();
 
           // egg icon on back
           const eggImg = getEggImage(i % 5, 'whole');
           if (eggImg.complete && eggImg.naturalWidth > 0) {
-            const eggH = 45;
+            const eggH = Math.round(ch * 0.32);
             const eggA = eggImg.naturalWidth / eggImg.naturalHeight;
             const eggW = eggH * eggA;
             ctx.globalAlpha = 0.5;
-            ctx.drawImage(eggImg, x + CARD_W / 2 - eggW / 2, y + CARD_H / 2 - eggH / 2, eggW, eggH);
+            ctx.drawImage(eggImg, x + cw / 2 - eggW / 2, y + ch / 2 - eggH / 2, eggW, eggH);
             ctx.globalAlpha = 1;
           }
 
@@ -287,26 +317,41 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
           ctx.fillStyle = 'rgba(255,255,255,0.6)';
           ctx.font = 'bold 28px Fredoka, sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('?', x + CARD_W / 2, y + CARD_H / 2 + 10);
+          ctx.fillText('?', x + cw / 2, y + ch / 2 + 10);
         }
 
-        // hover highlight for unmatched face-down cards
-        if (!card.flipped && !card.matched && s.lockTimer <= 0) {
-          const hx = mouse.mouseX - (x + CARD_W / 2);
-          const hy = mouse.mouseY - (y + CARD_H / 2);
-          if (hx * hx / ((CARD_W / 2) ** 2) + hy * hy / ((CARD_H / 2) ** 2) < 1) {
+        // hover highlight for clickable cards (not during preview)
+        if (!previewing && !card.flipped && !card.matched && s.lockTimer <= 0) {
+          const hx = mouse.mouseX - (x + cw / 2);
+          const hy = mouse.mouseY - (y + ch / 2);
+          if (hx * hx / ((cw / 2) ** 2) + hy * hy / ((ch / 2) ** 2) < 1) {
             ctx.save();
             ctx.shadowColor = 'rgba(255,255,100,0.6)';
             ctx.shadowBlur = 15;
             ctx.strokeStyle = 'rgba(255,255,200,0.5)';
             ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.roundRect(x, y, CARD_W, CARD_H, 14);
+            ctx.roundRect(x, y, cw, ch, 14);
             ctx.stroke();
             ctx.restore();
           }
         }
 
+        ctx.restore();
+      }
+
+      // preview countdown banner
+      if (previewing) {
+        const remaining = Math.ceil(s.previewTimer);
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.beginPath();
+        ctx.roundRect(W / 2 - 110, 62, 220, 40, 12);
+        ctx.fill();
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 18px Fredoka, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Memorize! ${remaining}`, W / 2, 88);
         ctx.restore();
       }
 
@@ -357,10 +402,12 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
 
       if (mx > 100 && mx < 180 && my > 14 && my < 48) {
         s.easyMode = toggleEasyMode();
-        s.cards = createCards(s.easyMode);
+        s.difficulty = getDifficulty();
+        s.cards = createCards(s.difficulty);
         s.flippedIndices = [];
         s.matched = 0;
-        s.totalPairs = getLayout(s.easyMode).cols * getLayout(s.easyMode).rows / 2;
+        s.totalPairs = getLayout(s.difficulty).cols * getLayout(s.difficulty).rows / 2;
+        s.previewTimer = s.difficulty === 'hard' ? HARD_PREVIEW_SEC : 0;
         return;
       }
       if (mx > W - 110 && mx < W && my > 10 && my < 54) {
@@ -368,20 +415,22 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
         return;
       }
 
-      if (s.lockTimer > 0 || s.celebrating > 0) return;
+      if (s.lockTimer > 0 || s.celebrating > 0 || s.previewTimer > 0) return;
 
-      const layout = getLayout(s.easyMode);
+      const layout = getLayout(s.difficulty);
+      const cw = layout.cardW;
+      const ch = layout.cardH;
       // find clicked card
       for (let i = 0; i < s.cards.length; i++) {
         const card = s.cards[i];
         if (card.flipped || card.matched) continue;
 
         const pos = getCardPos(i, layout);
-        if (mx >= pos.x && mx <= pos.x + CARD_W && my >= pos.y && my <= pos.y + CARD_H) {
+        if (mx >= pos.x && mx <= pos.x + cw && my >= pos.y && my <= pos.y + ch) {
           card.flipped = true;
           s.flippedIndices.push(i);
           playFlip();
-          s.particles.push(...spawnCelebration(pos.x + CARD_W / 2, pos.y + CARD_H / 2, 4));
+          s.particles.push(...spawnCelebration(pos.x + cw / 2, pos.y + ch / 2, 4));
 
           if (s.flippedIndices.length === 2) {
             const [a, b] = s.flippedIndices;
@@ -399,8 +448,8 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
               const posA = getCardPos(a, layout);
               const posB = getCardPos(b, layout);
               s.particles.push(
-                ...spawnCelebration(posA.x + CARD_W / 2, posA.y + CARD_H / 2, 15),
-                ...spawnCelebration(posB.x + CARD_W / 2, posB.y + CARD_H / 2, 15),
+                ...spawnCelebration(posA.x + cw / 2, posA.y + ch / 2, 15),
+                ...spawnCelebration(posB.x + cw / 2, posB.y + ch / 2, 15),
               );
 
               if (s.matched >= s.totalPairs) {

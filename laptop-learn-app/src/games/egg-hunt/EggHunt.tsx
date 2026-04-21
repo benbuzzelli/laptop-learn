@@ -6,6 +6,8 @@ import { spawnCelebration, updateParticles, drawParticles } from '../shared/part
 import { playHatch, playPop, playSticker } from '../shared/audio';
 import { earnSticker, trackProgress } from '../shared/stickers';
 import { isEasyMode, toggleEasyMode } from '../shared/easyMode';
+import { getDifficulty } from '../shared/difficulty';
+import type { Difficulty } from '../shared/difficulty';
 import { useGameCanvas } from '../shared/useGameCanvas';
 import type { Particle } from '../shared/types';
 
@@ -15,14 +17,23 @@ const H = 600;
 interface Egg {
   x: number;
   y: number;
+  vx: number;
+  vy: number;
   size: number;
   eggType: number;
   stage: EggStage;
   wobble: number;
 }
 
+function randomVelocity(difficulty: Difficulty): { vx: number; vy: number } {
+  if (difficulty !== 'hard') return { vx: 0, vy: 0 };
+  const speed = 55 + Math.random() * 35;
+  const angle = Math.random() * Math.PI * 2;
+  return { vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed };
+}
+
 let nextEggType = 0;
-function spawnEgg(existing: Egg[] = []): Egg {
+function spawnEgg(difficulty: Difficulty, existing: Egg[] = []): Egg {
   const size = 90 + Math.random() * 20;
   let x: number, y: number;
   let attempts = 0;
@@ -39,7 +50,8 @@ function spawnEgg(existing: Egg[] = []): Egg {
       return dx * dx + dy * dy < minDist * minDist;
     })
   );
-  return { x, y, size, eggType: nextEggType++ % EGG_TYPE_COUNT, stage: 'whole', wobble: 0 };
+  const { vx, vy } = randomVelocity(difficulty);
+  return { x, y, vx, vy, size, eggType: nextEggType++ % EGG_TYPE_COUNT, stage: 'whole', wobble: 0 };
 }
 
 function drawSpriteEgg(ctx: CanvasRenderingContext2D, egg: Egg, time: number) {
@@ -74,12 +86,14 @@ function drawSpriteEgg(ctx: CanvasRenderingContext2D, egg: Egg, time: number) {
 }
 
 export function EggHunt({ onBack }: { onBack: () => void }) {
+  const initialDiff = getDifficulty();
   const stateRef = useRef({
     eggs: (() => {
       const eggs: Egg[] = [];
-      for (let i = 0; i < 3; i++) eggs.push(spawnEgg(eggs));
+      for (let i = 0; i < 3; i++) eggs.push(spawnEgg(initialDiff, eggs));
       return eggs;
     })(),
+    difficulty: initialDiff,
     particles: [] as Particle[],
     hatched: 0,
     stickerPopup: '',
@@ -102,6 +116,24 @@ export function EggHunt({ onBack }: { onBack: () => void }) {
       if (s.stickerPopupTimer > 0) s.stickerPopupTimer -= dt;
       if (s.hatchPopupTimer > 0) s.hatchPopupTimer -= dt;
       s.particles = updateParticles(s.particles, dt);
+
+      // egg drift (hard mode): whole eggs float around and bounce off bounds
+      for (const egg of s.eggs) {
+        if (egg.stage !== 'whole') {
+          egg.vx = 0;
+          egg.vy = 0;
+          continue;
+        }
+        if (egg.vx === 0 && egg.vy === 0) continue;
+        egg.x += egg.vx * dt;
+        egg.y += egg.vy * dt;
+        const halfW = egg.size * 0.45;
+        const halfH = egg.size * 0.55;
+        if (egg.x < halfW + 20) { egg.x = halfW + 20; egg.vx = Math.abs(egg.vx); }
+        if (egg.x > W - halfW - 20) { egg.x = W - halfW - 20; egg.vx = -Math.abs(egg.vx); }
+        if (egg.y < halfH + 60) { egg.y = halfH + 60; egg.vy = Math.abs(egg.vy); }
+        if (egg.y > H - halfH - 60) { egg.y = H - halfH - 60; egg.vy = -Math.abs(egg.vy); }
+      }
 
       if (!s.bgGrad) {
         s.bgGrad = ctx.createLinearGradient(0, 0, 0, H);
@@ -321,6 +353,20 @@ export function EggHunt({ onBack }: { onBack: () => void }) {
 
       if (mx > 100 && mx < 180 && my > 14 && my < 48) {
         s.easyMode = toggleEasyMode();
+        s.difficulty = getDifficulty();
+        // if the new difficulty is hard, set drift velocities on any currently-whole eggs
+        for (const egg of s.eggs) {
+          if (egg.stage === 'whole') {
+            if (s.difficulty === 'hard' && egg.vx === 0 && egg.vy === 0) {
+              const v = randomVelocity('hard');
+              egg.vx = v.vx;
+              egg.vy = v.vy;
+            } else if (s.difficulty !== 'hard') {
+              egg.vx = 0;
+              egg.vy = 0;
+            }
+          }
+        }
         return;
       }
       if (mx > W - 110 && mx < W && my > 10 && my < 54) {
@@ -356,7 +402,7 @@ export function EggHunt({ onBack }: { onBack: () => void }) {
               if (idx !== -1) {
                 s.eggs.splice(idx, 1);
                 const others = s.eggs.filter((e) => e.stage !== 'grown');
-                s.eggs.push(spawnEgg(others));
+                s.eggs.push(spawnEgg(s.difficulty, others));
               }
             }, 2500);
 

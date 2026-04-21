@@ -1,4 +1,4 @@
-import { getDinoImage, getBabyDinoImage, getMouseImage } from './dino-svgs';
+import { getDinoImage, getBabyDinoImage, getMouseImage, getWalkDinoFrame, WALK_FRAME_COUNT } from './dino-svgs';
 
 function expandHex(hex: string): string {
   if (hex.length === 4) return `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
@@ -54,6 +54,47 @@ export function drawDino(
   ctx.fill();
 
   ctx.drawImage(img, x - renderW / 2, y - renderH * 0.4, renderW, renderH);
+  ctx.restore();
+}
+
+export type WalkDirection = 'up' | 'down' | 'left' | 'right';
+
+const DIR_ROTATION: Record<WalkDirection, number> = {
+  up: 0,
+  right: Math.PI / 2,
+  down: Math.PI,
+  left: -Math.PI / 2,
+};
+
+export function drawWalkDino(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  direction: WalkDirection,
+  time: number,
+  animSpeed = 8,
+) {
+  const frame = Math.floor(time * animSpeed) % WALK_FRAME_COUNT;
+  const img = getWalkDinoFrame(frame);
+  if (!img.complete || img.naturalWidth === 0) return;
+
+  const renderH = size * 1.4;
+  const aspect = img.naturalWidth / img.naturalHeight;
+  const renderW = renderH * aspect;
+  const rotation = DIR_ROTATION[direction];
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  ctx.beginPath();
+  ctx.ellipse(0, renderH * 0.35, renderW * 0.35, renderH * 0.05, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.drawImage(img, -renderW / 2, -renderH * 0.4, renderW, renderH);
   ctx.restore();
 }
 

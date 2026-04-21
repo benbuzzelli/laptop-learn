@@ -5,6 +5,7 @@ import { getCollectionCount } from '../games/shared/collection';
 import { getAllSlots } from '../games/shared/collection';
 import { loadStickers } from '../games/shared/stickers';
 import { useGameCanvas } from '../games/shared/useGameCanvas';
+import { getActiveProfile } from '../games/shared/profile';
 import type { GameId } from '../games/shared/types';
 
 const W = 800;
@@ -23,62 +24,36 @@ interface GameCard {
 }
 
 const CARD_GAP = 12;
-const CARD_W = 118;
-const CARD_H = 155;
-const TOTAL_CARDS = 6;
-const CARDS_TOTAL_W = TOTAL_CARDS * CARD_W + (TOTAL_CARDS - 1) * CARD_GAP;
-const CARDS_START_X = (W - CARDS_TOTAL_W) / 2;
+const CARD_W = 110;
+const CARD_H = 140;
 
-const CARDS: GameCard[] = [
-  {
-    id: 'egg-hunt',
-    title: 'Egg Hunt',
-    icon: '🥚',
-    color: '#FF6B6B',
-    desc: 'Click eggs to hatch dinos!',
-    x: CARDS_START_X, y: 180, w: CARD_W, h: CARD_H,
-  },
-  {
-    id: 'dino-path',
-    title: 'Dino Path',
-    icon: '🦕',
-    color: '#4ECDC4',
-    desc: 'Follow the dots home!',
-    x: CARDS_START_X + (CARD_W + CARD_GAP), y: 180, w: CARD_W, h: CARD_H,
-  },
-  {
-    id: 'spell-dino',
-    title: 'Spell Dino',
-    icon: '🔤',
-    color: '#FFA726',
-    desc: 'Type letters to spell!',
-    x: CARDS_START_X + (CARD_W + CARD_GAP) * 2, y: 180, w: CARD_W, h: CARD_H,
-  },
-  {
-    id: 'volcano-escape',
-    title: 'Volcano Run',
-    icon: '🌋',
-    color: '#FF9800',
-    desc: 'Arrow keys to escape!',
-    x: CARDS_START_X + (CARD_W + CARD_GAP) * 3, y: 180, w: CARD_W, h: CARD_H,
-  },
-  {
-    id: 'dino-match',
-    title: 'Dino Match',
-    icon: '🧩',
-    color: '#7E57C2',
-    desc: 'Flip cards to match!',
-    x: CARDS_START_X + (CARD_W + CARD_GAP) * 4, y: 180, w: CARD_W, h: CARD_H,
-  },
-  {
-    id: 'jungle-explorer',
-    title: 'Jungle Find',
-    icon: '🌴',
-    color: '#2E7D32',
-    desc: 'Find hidden dinos!',
-    x: CARDS_START_X + (CARD_W + CARD_GAP) * 5, y: 180, w: CARD_W, h: CARD_H,
-  },
-];
+function layoutCards(): GameCard[] {
+  const defs: { id: GameId; title: string; icon: string; color: string; desc: string }[] = [
+    { id: 'egg-hunt', title: 'Egg Hunt', icon: '🥚', color: '#FF6B6B', desc: 'Click eggs to hatch dinos!' },
+    { id: 'dino-path', title: 'Dino Path', icon: '🦕', color: '#4ECDC4', desc: 'Follow the dots home!' },
+    { id: 'spell-dino', title: 'Spell Dino', icon: '🔤', color: '#FFA726', desc: 'Type letters to spell!' },
+    { id: 'volcano-escape', title: 'Volcano Run', icon: '🌋', color: '#FF9800', desc: 'Arrow keys to escape!' },
+    { id: 'dino-match', title: 'Dino Match', icon: '🧩', color: '#7E57C2', desc: 'Flip cards to match!' },
+    { id: 'jungle-explorer', title: 'Jungle Find', icon: '🌴', color: '#2E7D32', desc: 'Find hidden dinos!' },
+    { id: 'dino-dungeon', title: 'Dino Dungeon', icon: '🏰', color: '#795548', desc: 'Sneak and find treasure!' },
+  ];
+
+  const row1 = defs.slice(0, 4);
+  const row2 = defs.slice(4);
+  const row1W = row1.length * CARD_W + (row1.length - 1) * CARD_GAP;
+  const row2W = row2.length * CARD_W + (row2.length - 1) * CARD_GAP;
+  const row1X = (W - row1W) / 2;
+  const row2X = (W - row2W) / 2;
+  const row1Y = 160;
+  const row2Y = row1Y + CARD_H + CARD_GAP;
+
+  const cards: GameCard[] = [];
+  row1.forEach((d, i) => cards.push({ ...d, x: row1X + i * (CARD_W + CARD_GAP), y: row1Y, w: CARD_W, h: CARD_H }));
+  row2.forEach((d, i) => cards.push({ ...d, x: row2X + i * (CARD_W + CARD_GAP), y: row2Y, w: CARD_W, h: CARD_H }));
+  return cards;
+}
+
+const CARDS = layoutCards();
 
 export function HomeScreen({ onSelectGame }: { onSelectGame: (id: GameId) => void }) {
   const selectedRef = useRef<number>(-1);
@@ -238,6 +213,19 @@ export function HomeScreen({ onSelectGame }: { onSelectGame: (id: GameId) => voi
             const bW = bH * bA;
             ctx.drawImage(bushImg, iconCx - bW / 2, iconCy + iconBob + 2, bW, bH);
           }
+        } else if (card.id === 'dino-dungeon') {
+          // treasure chest + sneaky dino
+          ctx.font = '28px serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('💎', iconCx - 14, iconCy + iconBob - 8);
+          ctx.fillText('🦴', iconCx + 14, iconCy + iconBob + 8);
+          const dinoImg = getDinoImage('rex', undefined, 0, 0);
+          if (dinoImg.complete && dinoImg.naturalWidth > 0) {
+            const dA = dinoImg.naturalWidth / dinoImg.naturalHeight;
+            const dH = 36;
+            const dW = dH * dA;
+            ctx.drawImage(dinoImg, iconCx - dW / 2, iconCy + iconBob + 10, dW, dH);
+          }
         }
 
         // title
@@ -285,15 +273,15 @@ export function HomeScreen({ onSelectGame }: { onSelectGame: (id: GameId) => voi
       const gameColors: Record<string, string> = {
         'egg-hunt': '#FF6B6B', 'dino-path': '#4ECDC4',
         'spell-dino': '#FFA726', 'volcano': '#FF9800',
-        'dino-match': '#7E57C2', 'jungle-explorer': '#2E7D32',
+        'dino-match': '#7E57C2', 'jungle-explorer': '#2E7D32', 'dino-dungeon': '#795548',
       };
       const gameLabels: Record<string, string> = {
         'egg-hunt': 'Egg Hunt', 'dino-path': 'Dino Path',
         'spell-dino': 'Spelling', 'volcano': 'Volcano',
-        'dino-match': 'Matching', 'jungle-explorer': 'Jungle',
+        'dino-match': 'Matching', 'jungle-explorer': 'Jungle', 'dino-dungeon': 'Dungeon',
       };
 
-      const groups = ['egg-hunt', 'dino-path', 'spell-dino', 'volcano', 'dino-match', 'jungle-explorer'];
+      const groups = ['egg-hunt', 'dino-path', 'spell-dino', 'volcano', 'dino-match', 'jungle-explorer', 'dino-dungeon'];
       const groupW = Math.min(140, (W - 60) / groups.length - 10);
       const groupGap = 10;
       const totalGW = groups.length * groupW + (groups.length - 1) * groupGap;
@@ -454,9 +442,17 @@ export function HomeScreen({ onSelectGame }: { onSelectGame: (id: GameId) => voi
       ctx.textAlign = 'center';
       ctx.fillText(`Dino Collection ${collected}/${slots.length}`, W / 2, collBtnY + 23);
 
+      // player name
+      const playerName = getActiveProfile();
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.font = 'bold 13px Fredoka, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`Playing as: ${playerName}`, W - 16, H - 14);
+
       // footer
       ctx.fillStyle = 'rgba(255,255,255,0.2)';
       ctx.font = '12px Fredoka, sans-serif';
+      ctx.textAlign = 'center';
       ctx.fillText('Click a game or use ← → arrow keys!', W / 2, H - 14);
 
       drawCustomCursor(ctx, mx, my, !mouse.isTouch, mouse.mouseDown);

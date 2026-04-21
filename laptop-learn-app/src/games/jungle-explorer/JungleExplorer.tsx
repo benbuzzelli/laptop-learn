@@ -68,26 +68,57 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+// River center X at a given Y — the river runs from upper-center to lower-right
+function riverCenterX(y: number): number {
+  const t = (y - 180) / (H - 180);
+  return 380 + t * 250;
+}
+
+// River width widens toward the bottom
+function riverHalfWidth(y: number): number {
+  const t = (y - 180) / (H - 180);
+  return 25 + t * 45;
+}
+
+function isOnGrass(x: number, y: number): boolean {
+  // above the grass line — mountains/volcano/sky
+  if (y < 300) return false;
+  // too close to the river
+  const rcx = riverCenterX(y);
+  const rhw = riverHalfWidth(y) + 30;
+  if (Math.abs(x - rcx) < rhw) return false;
+  // keep away from edges
+  if (x < 30 || x > W - 30) return false;
+  return true;
+}
+
+function randomGrassPoint(yMin: number, yMax: number): { x: number; y: number } {
+  for (let i = 0; i < 80; i++) {
+    const x = 40 + Math.random() * (W - 80);
+    const y = yMin + Math.random() * (yMax - yMin);
+    if (isOnGrass(x, y)) return { x, y };
+  }
+  return { x: 150, y: 420 };
+}
+
 function generateScene(easy: boolean): SceneData {
   const count = easy ? 3 : 5;
   const picked = shuffle(ALL_DINOS).slice(0, count);
 
-  const groundY = H * 0.60;
   const zones: { x: number; y: number }[] = [];
   const minDist = 120;
 
   for (const _d of picked) {
-    let x: number, y: number;
+    let pos: { x: number; y: number };
     let attempts = 0;
     do {
-      x = 90 + Math.random() * (W - 180);
-      y = groundY - 10 + Math.random() * (H * 0.28);
+      pos = randomGrassPoint(320, 520);
       attempts++;
     } while (
       attempts < 50 &&
-      zones.some((z) => Math.abs(z.x - x) < minDist && Math.abs(z.y - y) < 60)
+      zones.some((z) => Math.abs(z.x - pos.x) < minDist && Math.abs(z.y - pos.y) < 60)
     );
-    zones.push({ x, y });
+    zones.push(pos);
   }
 
   const dinos: HiddenDino[] = picked.map((d, i) => ({
@@ -101,54 +132,50 @@ function generateScene(easy: boolean): SceneData {
     facingLeft: Math.random() > 0.5,
   }));
 
-  // background foliage (behind dinos) — spread across scene
+  // background foliage — on grass only
   const bgFoliage: FoliageItem[] = [];
   for (let i = 0; i < 10; i++) {
+    const pos = randomGrassPoint(340, H - 20);
     bgFoliage.push({
-      x: Math.random() * W,
-      y: groundY + Math.random() * (H - groundY - 20),
+      x: pos.x,
+      y: pos.y,
       seed: Math.floor(Math.random() * 1000),
       scale: 0.6 + Math.random() * 0.5,
       flip: Math.random() > 0.5,
     });
   }
 
-  // foreground foliage (in front of dinos) — more dense
+  // foreground foliage — on grass only
   const fgFoliage: FoliageItem[] = [];
   for (let i = 0; i < 8; i++) {
+    const pos = randomGrassPoint(360, H - 30);
     fgFoliage.push({
-      x: Math.random() * W,
-      y: groundY + 10 + Math.random() * (H - groundY - 40),
+      x: pos.x,
+      y: pos.y,
       seed: 500 + Math.floor(Math.random() * 500),
       scale: 0.7 + Math.random() * 0.6,
       flip: Math.random() > 0.5,
     });
   }
 
-  // edge palms — tall ones at left/right edges
-  for (let i = 0; i < 3; i++) {
+  // edge palms — left side only (right side has river exit)
+  for (let i = 0; i < 4; i++) {
     bgFoliage.push({
-      x: 20 + Math.random() * 60,
-      y: groundY - 10 + Math.random() * 30,
+      x: 25 + Math.random() * 50,
+      y: 330 + Math.random() * 40,
       seed: 2000 + i,
       scale: 1.0 + Math.random() * 0.4,
-      flip: false,
-    });
-    bgFoliage.push({
-      x: W - 20 - Math.random() * 60,
-      y: groundY - 10 + Math.random() * 30,
-      seed: 2010 + i,
-      scale: 1.0 + Math.random() * 0.4,
-      flip: true,
+      flip: Math.random() > 0.5,
     });
   }
 
   const flowers: SceneData['flowers'] = [];
   const flowerColors = ['#FF6B6B', '#FFD93D', '#FF8ED4', '#C084FC', '#FFA726'];
   for (let i = 0; i < 8; i++) {
+    const pos = randomGrassPoint(340, H - 20);
     flowers.push({
-      x: 30 + Math.random() * (W - 60),
-      y: groundY + 5 + Math.random() * (H - groundY - 20),
+      x: pos.x,
+      y: pos.y,
       color: flowerColors[Math.floor(Math.random() * flowerColors.length)],
     });
   }
@@ -224,7 +251,7 @@ export function JungleExplorer({ onBack }: { onBack: () => void }) {
       }
       for (const dino of s.scene.dinos) {
         const sortY = dino.found
-          ? dino.y
+          ? H + 1
           : dino.y + dino.size * 0.15 + dino.size * 1.1 * 0.7;
         drawables.push({ type: 'dino', item: dino, y: sortY });
       }

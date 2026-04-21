@@ -1,11 +1,38 @@
+const VOLUME_KEY = 'dinoLearn_volume';
+const MUTE_KEY = 'dinoLearn_muted';
+
 let audioCtx: AudioContext | null = null;
 let masterGain: GainNode | null = null;
+let userVolume = loadVolume();
+let isMuted = loadMuted();
+
+function loadVolume(): number {
+  try {
+    const raw = localStorage.getItem(VOLUME_KEY);
+    if (raw !== null) return Math.max(0, Math.min(1, parseFloat(raw)));
+  } catch {}
+  return 0.5;
+}
+
+function loadMuted(): boolean {
+  try {
+    return localStorage.getItem(MUTE_KEY) === '1';
+  } catch {}
+  return false;
+}
+
+function applyVolume() {
+  if (masterGain) {
+    const effective = isMuted ? 0 : userVolume * 0.6;
+    masterGain.gain.setValueAtTime(effective, audioCtx!.currentTime);
+  }
+}
 
 function getCtx(): AudioContext {
   if (!audioCtx) {
     audioCtx = new AudioContext();
     masterGain = audioCtx.createGain();
-    masterGain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    applyVolume();
     masterGain.connect(audioCtx.destination);
   }
   if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -19,6 +46,26 @@ function getMaster(): GainNode {
 
 export function initAudio() {
   getCtx();
+}
+
+export function getVolume(): number {
+  return userVolume;
+}
+
+export function setVolume(v: number) {
+  userVolume = Math.max(0, Math.min(1, v));
+  try { localStorage.setItem(VOLUME_KEY, String(userVolume)); } catch {}
+  applyVolume();
+}
+
+export function getMuted(): boolean {
+  return isMuted;
+}
+
+export function setMuted(m: boolean) {
+  isMuted = m;
+  try { localStorage.setItem(MUTE_KEY, m ? '1' : '0'); } catch {}
+  applyVolume();
 }
 
 function playTone(freq: number, duration: number, type: OscillatorType = 'sine', volume = 0.15) {

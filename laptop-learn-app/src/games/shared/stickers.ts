@@ -1,7 +1,5 @@
 import type { Sticker } from './types';
-
-const STICKER_KEY = 'dinoLearn_stickers';
-const PROGRESS_KEY = 'dinoLearn_progress';
+import { profileKey } from './profile';
 
 export interface StickerDef {
   id: string;
@@ -24,6 +22,8 @@ const ALL_STICKERS: StickerDef[] = [
   { id: 'dino-match-3', emoji: '🧠', name: 'Memory Master', game: 'dino-match', threshold: 3 },
   { id: 'jungle-explorer-1', emoji: '🔍', name: 'First Discovery', game: 'jungle-explorer', threshold: 1 },
   { id: 'jungle-explorer-3', emoji: '🌴', name: 'Jungle Expert', game: 'jungle-explorer', threshold: 3 },
+  { id: 'dino-dungeon-1', emoji: '🏰', name: 'First Expedition', game: 'dino-dungeon', threshold: 1 },
+  { id: 'dino-dungeon-3', emoji: '⚔️', name: 'Dungeon Master', game: 'dino-dungeon', threshold: 3 },
 ];
 
 export interface StickerWithProgress extends Sticker {
@@ -34,7 +34,7 @@ export interface StickerWithProgress extends Sticker {
 
 export function loadStickers(): StickerWithProgress[] {
   try {
-    const raw = localStorage.getItem(STICKER_KEY);
+    const raw = localStorage.getItem(profileKey('stickers'));
     const earnedIds: string[] = raw ? JSON.parse(raw) : [];
     const progress = loadProgress();
 
@@ -48,7 +48,7 @@ export function loadStickers(): StickerWithProgress[] {
       }
     }
     if (dirty) {
-      localStorage.setItem(STICKER_KEY, JSON.stringify(earnedIds));
+      localStorage.setItem(profileKey('stickers'), JSON.stringify(earnedIds));
     }
 
     return ALL_STICKERS.map((s) => ({
@@ -71,11 +71,11 @@ export function loadStickers(): StickerWithProgress[] {
 
 export function earnSticker(id: string) {
   try {
-    const raw = localStorage.getItem(STICKER_KEY);
+    const raw = localStorage.getItem(profileKey('stickers'));
     const saved: string[] = raw ? JSON.parse(raw) : [];
     if (Array.isArray(saved) && !saved.includes(id)) {
       saved.push(id);
-      localStorage.setItem(STICKER_KEY, JSON.stringify(saved));
+      localStorage.setItem(profileKey('stickers'), JSON.stringify(saved));
     }
   } catch {
     // ignore
@@ -84,7 +84,7 @@ export function earnSticker(id: string) {
 
 function loadProgress(): Record<string, number> {
   try {
-    const raw = localStorage.getItem(PROGRESS_KEY);
+    const raw = localStorage.getItem(profileKey('progress'));
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (typeof parsed === 'object' && parsed !== null) return parsed;
@@ -99,7 +99,7 @@ export function trackProgress(game: string): number {
     const progress = loadProgress();
     const current = (progress[game] ?? 0) + 1;
     progress[game] = current;
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+    localStorage.setItem(profileKey('progress'), JSON.stringify(progress));
     return current;
   } catch {
     return 0;
