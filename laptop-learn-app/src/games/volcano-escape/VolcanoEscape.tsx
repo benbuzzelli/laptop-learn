@@ -198,7 +198,7 @@ export function VolcanoEscape({ onBack }: { onBack: () => void }) {
       s.celebrating = 2.5;
       playCelebration();
       s.particles.push(...spawnCelebration(px, py, 25));
-      trackDinoEncounter('rex');
+      trackDinoEncounter('rex', 0, 'volcano-escape');
 
       const total = trackProgress('volcano');
       if (total === 1) {

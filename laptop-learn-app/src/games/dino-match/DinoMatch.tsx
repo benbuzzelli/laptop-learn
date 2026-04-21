@@ -394,7 +394,7 @@ export function DinoMatch({ onBack }: { onBack: () => void }) {
               s.matched++;
               s.flippedIndices = [];
               playMatch();
-              trackDinoEncounter(cardA.species, cardA.version);
+              trackDinoEncounter(cardA.species, cardA.version, 'dino-match');
 
               const posA = getCardPos(a, layout);
               const posB = getCardPos(b, layout);

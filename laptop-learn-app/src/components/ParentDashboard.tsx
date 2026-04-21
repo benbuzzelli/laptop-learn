@@ -44,6 +44,7 @@ const GAME_NAMES: Record<string, string> = {
   'spell-dino': 'Spell the Dino',
   'volcano': 'Volcano Escape',
   'dino-match': 'Dino Match',
+  'jungle-explorer': 'Jungle Explorer',
 };
 
 export function ParentDashboard({ onClose, onTimerRestart }: { onClose: () => void; onTimerRestart: () => void }) {

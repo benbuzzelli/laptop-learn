@@ -22,6 +22,8 @@ const ALL_STICKERS: StickerDef[] = [
   { id: 'volcano-3', emoji: '🏆', name: 'Escape Artist', game: 'volcano', threshold: 3 },
   { id: 'dino-match-1', emoji: '🃏', name: 'First Match', game: 'dino-match', threshold: 1 },
   { id: 'dino-match-3', emoji: '🧠', name: 'Memory Master', game: 'dino-match', threshold: 3 },
+  { id: 'jungle-explorer-1', emoji: '🔍', name: 'First Discovery', game: 'jungle-explorer', threshold: 1 },
+  { id: 'jungle-explorer-3', emoji: '🌴', name: 'Jungle Expert', game: 'jungle-explorer', threshold: 3 },
 ];
 
 export interface StickerWithProgress extends Sticker {

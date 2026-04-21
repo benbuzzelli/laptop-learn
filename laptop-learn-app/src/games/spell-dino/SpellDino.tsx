@@ -85,7 +85,7 @@ export function SpellDino({ onBack }: { onBack: () => void }) {
           s.celebrating = 2.5;
           playCelebration();
           s.particles.push(...spawnCelebration(W / 2, 300, 30));
-          trackDinoEncounter(dino.species, dino.version ?? 0);
+          trackDinoEncounter(dino.species, dino.version ?? 0, 'spell-dino');
 
           const total = trackProgress('spell-dino');
           if (total === 1) {

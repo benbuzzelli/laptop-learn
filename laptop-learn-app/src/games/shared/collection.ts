@@ -7,6 +7,7 @@ export interface DinoRecord {
   version: number;
   encounters: number;
   firstSeen: number;
+  foundIn?: string;
 }
 
 function loadRaw(): DinoRecord[] {
@@ -26,7 +27,7 @@ function save(records: DinoRecord[]) {
   } catch {}
 }
 
-export function trackDinoEncounter(species: DinoSpecies, version = 0) {
+export function trackDinoEncounter(species: DinoSpecies, version = 0, game?: string) {
   const records = loadRaw();
   const existing = records.find((r) => r.species === species && r.version === version);
   if (existing) {
@@ -37,6 +38,7 @@ export function trackDinoEncounter(species: DinoSpecies, version = 0) {
       version,
       encounters: 1,
       firstSeen: Date.now(),
+      foundIn: game,
     });
   }
   save(records);

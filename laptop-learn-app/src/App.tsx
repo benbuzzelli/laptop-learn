@@ -6,6 +6,7 @@ import { DinoPath } from './games/dino-path/DinoPath';
 import { SpellDino } from './games/spell-dino/SpellDino';
 import { VolcanoEscape } from './games/volcano-escape/VolcanoEscape';
 import { DinoMatch } from './games/dino-match/DinoMatch';
+import { JungleExplorer } from './games/jungle-explorer/JungleExplorer';
 import { DinoCollection } from './components/DinoCollection';
 import { ParentDashboard } from './components/ParentDashboard';
 import { initAudio } from './games/shared/audio';
@@ -234,6 +235,7 @@ function App() {
           {currentGame === 'spell-dino' && <SpellDino key={gameKey} onBack={handleBack} />}
           {currentGame === 'volcano-escape' && <VolcanoEscape key={gameKey} onBack={handleBack} />}
           {currentGame === 'dino-match' && <DinoMatch key={gameKey} onBack={handleBack} />}
+          {currentGame === 'jungle-explorer' && <JungleExplorer key={gameKey} onBack={handleBack} />}
           {currentGame === 'collection' && <DinoCollection key={gameKey} onBack={handleBack} />}
         </>
       )}

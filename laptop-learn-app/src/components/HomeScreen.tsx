@@ -1,6 +1,6 @@
 import { useRef, useCallback } from 'react';
 import { drawCustomCursor } from '../games/shared/draw';
-import { getEggImage, getVolcanoImage, getFootprintImage, getTitleLogoImage, getStickerImage, getDinoImage } from '../games/shared/dino-svgs';
+import { getEggImage, getVolcanoImage, getFootprintImage, getTitleLogoImage, getStickerImage, getDinoImage, getBushImage } from '../games/shared/dino-svgs';
 import { getCollectionCount } from '../games/shared/collection';
 import { getAllSlots } from '../games/shared/collection';
 import { loadStickers } from '../games/shared/stickers';
@@ -22,20 +22,20 @@ interface GameCard {
   h: number;
 }
 
-const CARD_GAP = 14;
-const CARD_W = 140;
-const CARD_H = 170;
-const TOTAL_CARDS = 5;
+const CARD_GAP = 12;
+const CARD_W = 118;
+const CARD_H = 155;
+const TOTAL_CARDS = 6;
 const CARDS_TOTAL_W = TOTAL_CARDS * CARD_W + (TOTAL_CARDS - 1) * CARD_GAP;
 const CARDS_START_X = (W - CARDS_TOTAL_W) / 2;
 
 const CARDS: GameCard[] = [
   {
     id: 'egg-hunt',
-    title: 'Dino Egg Hunt',
+    title: 'Egg Hunt',
     icon: '🥚',
     color: '#FF6B6B',
-    desc: 'Click eggs to hatch baby dinos!',
+    desc: 'Click eggs to hatch dinos!',
     x: CARDS_START_X, y: 180, w: CARD_W, h: CARD_H,
   },
   {
@@ -48,18 +48,18 @@ const CARDS: GameCard[] = [
   },
   {
     id: 'spell-dino',
-    title: 'Spell the Dino',
+    title: 'Spell Dino',
     icon: '🔤',
     color: '#FFA726',
-    desc: 'Type letters to spell names!',
+    desc: 'Type letters to spell!',
     x: CARDS_START_X + (CARD_W + CARD_GAP) * 2, y: 180, w: CARD_W, h: CARD_H,
   },
   {
     id: 'volcano-escape',
-    title: 'Volcano Escape',
+    title: 'Volcano Run',
     icon: '🌋',
     color: '#FF9800',
-    desc: 'Arrow keys to find the star!',
+    desc: 'Arrow keys to escape!',
     x: CARDS_START_X + (CARD_W + CARD_GAP) * 3, y: 180, w: CARD_W, h: CARD_H,
   },
   {
@@ -67,8 +67,16 @@ const CARDS: GameCard[] = [
     title: 'Dino Match',
     icon: '🧩',
     color: '#7E57C2',
-    desc: 'Flip cards to find dino pairs!',
+    desc: 'Flip cards to match!',
     x: CARDS_START_X + (CARD_W + CARD_GAP) * 4, y: 180, w: CARD_W, h: CARD_H,
+  },
+  {
+    id: 'jungle-explorer',
+    title: 'Jungle Find',
+    icon: '🌴',
+    color: '#2E7D32',
+    desc: 'Find hidden dinos!',
+    x: CARDS_START_X + (CARD_W + CARD_GAP) * 5, y: 180, w: CARD_W, h: CARD_H,
   },
 ];
 
@@ -213,6 +221,23 @@ export function HomeScreen({ onSelectGame }: { onSelectGame: (id: GameId) => voi
             const mSize = 50;
             ctx.drawImage(matchImg, iconCx - mSize * a / 2, iconCy + iconBob - mSize / 2, mSize * a, mSize);
           }
+        } else if (card.id === 'jungle-explorer') {
+          // dino peeking behind a bush sprite
+          const dinoImg = getDinoImage('raptor', undefined, 0, 0);
+          const bushImg = getBushImage(3);
+          const dinoS = 40;
+          if (dinoImg.complete && dinoImg.naturalWidth > 0) {
+            const dA = dinoImg.naturalWidth / dinoImg.naturalHeight;
+            const dH = dinoS * 1.4;
+            const dW = dH * dA;
+            ctx.drawImage(dinoImg, iconCx - dW / 2, iconCy + iconBob - dH * 0.3, dW, dH);
+          }
+          if (bushImg.complete && bushImg.naturalWidth > 0) {
+            const bA = bushImg.naturalWidth / bushImg.naturalHeight;
+            const bH = 50;
+            const bW = bH * bA;
+            ctx.drawImage(bushImg, iconCx - bW / 2, iconCy + iconBob + 2, bW, bH);
+          }
         }
 
         // title
@@ -260,15 +285,15 @@ export function HomeScreen({ onSelectGame }: { onSelectGame: (id: GameId) => voi
       const gameColors: Record<string, string> = {
         'egg-hunt': '#FF6B6B', 'dino-path': '#4ECDC4',
         'spell-dino': '#FFA726', 'volcano': '#FF9800',
-        'dino-match': '#7E57C2',
+        'dino-match': '#7E57C2', 'jungle-explorer': '#2E7D32',
       };
       const gameLabels: Record<string, string> = {
         'egg-hunt': 'Egg Hunt', 'dino-path': 'Dino Path',
         'spell-dino': 'Spelling', 'volcano': 'Volcano',
-        'dino-match': 'Matching',
+        'dino-match': 'Matching', 'jungle-explorer': 'Jungle',
       };
 
-      const groups = ['egg-hunt', 'dino-path', 'spell-dino', 'volcano', 'dino-match'];
+      const groups = ['egg-hunt', 'dino-path', 'spell-dino', 'volcano', 'dino-match', 'jungle-explorer'];
       const groupW = Math.min(140, (W - 60) / groups.length - 10);
       const groupGap = 10;
       const totalGW = groups.length * groupW + (groups.length - 1) * groupGap;
@@ -277,23 +302,23 @@ export function HomeScreen({ onSelectGame }: { onSelectGame: (id: GameId) => voi
       // panel background
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
       ctx.beginPath();
-      ctx.roundRect(groupStartX - 16, 375, totalGW + 32, 140, 16);
+      ctx.roundRect(groupStartX - 16, 360, totalGW + 32, 140, 16);
       ctx.fill();
 
       // title + count
       ctx.fillStyle = 'rgba(255,255,255,0.7)';
       ctx.font = 'bold 16px Fredoka, sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText('Sticker Collection', groupStartX - 6, 393);
+      ctx.fillText('Sticker Collection', groupStartX - 6, 378);
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
       ctx.font = '14px Fredoka, sans-serif';
-      ctx.fillText(`${earnedCount}/${stickers.length}`, groupStartX + totalGW + 6, 393);
+      ctx.fillText(`${earnedCount}/${stickers.length}`, groupStartX + totalGW + 6, 378);
 
       for (let gi = 0; gi < groups.length; gi++) {
         const gKey = groups[gi];
         const gx = groupStartX + gi * (groupW + groupGap);
-        const gy = 405;
+        const gy = 390;
         const gColor = gameColors[gKey];
         const gStickers = stickers.filter((s) => s.id.startsWith(gKey));
 
@@ -434,7 +459,7 @@ export function HomeScreen({ onSelectGame }: { onSelectGame: (id: GameId) => voi
       ctx.font = '12px Fredoka, sans-serif';
       ctx.fillText('Click a game or use ← → arrow keys!', W / 2, H - 14);
 
-      drawCustomCursor(ctx, mx, my, !mouse.isTouch);
+      drawCustomCursor(ctx, mx, my, !mouse.isTouch, mouse.mouseDown);
     },
   });
 

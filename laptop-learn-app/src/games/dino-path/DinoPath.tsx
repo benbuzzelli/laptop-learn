@@ -88,7 +88,7 @@ export function DinoPath({ onBack }: { onBack: () => void }) {
               s.celebrating = 2;
               playCelebration();
               s.particles.push(...spawnCelebration(target.x, target.y, 25));
-              trackDinoEncounter('bronto');
+              trackDinoEncounter('bronto', 0, 'dino-path');
 
               const total = trackProgress('dino-path');
               if (total === 1) {

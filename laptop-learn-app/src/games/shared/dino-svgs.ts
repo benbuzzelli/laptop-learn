@@ -102,6 +102,20 @@ import arrowRightUrl from './sprites/right.png';
 
 import finishUrl from './sprites/finish.png';
 
+// Foliage sprites
+import bush1Url from './sprites/foliage/bush-1.png';
+import bush2Url from './sprites/foliage/bush-2.png';
+import bush3Url from './sprites/foliage/bush-3.png';
+import bush4Url from './sprites/foliage/bush-4.png';
+import palm1Url from './sprites/foliage/palm-1.png';
+import palm2Url from './sprites/foliage/palm-2.png';
+import palm3Url from './sprites/foliage/palm-3.png';
+import palm4Url from './sprites/foliage/palm-4.png';
+import palm5Url from './sprites/foliage/palm-5.png';
+import bonesBushUrl from './sprites/foliage/bones-bush.png';
+import fossilUrl from './sprites/foliage/fossil.png';
+import volcanoBushUrl from './sprites/foliage/volcano-bush.png';
+
 // Misc sprites
 import mouseUrl from './sprites/mouse.png';
 import mouseClickUrl from './sprites/mouse-click.png';
@@ -248,6 +262,45 @@ export function getArrowImage(direction: string): HTMLImageElement | null {
   const url = ARROW_URLS[direction];
   if (!url) return null;
   return loadUrl(url);
+}
+
+// Foliage: bushes 60%, palms 30%, rare 10%
+const FOLIAGE_TILES = [
+  { url: bush1Url, weight: 15 },
+  { url: bush2Url, weight: 15 },
+  { url: bush3Url, weight: 15 },
+  { url: bush4Url, weight: 15 },
+  { url: palm1Url, weight: 6 },
+  { url: palm2Url, weight: 6 },
+  { url: palm3Url, weight: 6 },
+  { url: palm4Url, weight: 6 },
+  { url: palm5Url, weight: 6 },
+  { url: bonesBushUrl, weight: 4 },
+  { url: fossilUrl, weight: 3 },
+  { url: volcanoBushUrl, weight: 3 },
+];
+const FOLIAGE_TOTAL = FOLIAGE_TILES.reduce((s, t) => s + t.weight, 0);
+
+export function getFoliageImage(seed: number): HTMLImageElement {
+  let pick = (tileHash(seed, 99) * FOLIAGE_TOTAL);
+  for (const tile of FOLIAGE_TILES) {
+    pick -= tile.weight;
+    if (pick <= 0) return loadUrl(tile.url);
+  }
+  return loadUrl(bush1Url);
+}
+
+const BUSH_URLS = [bush1Url, bush2Url, bush3Url, bush4Url];
+const PALM_URLS = [palm1Url, palm2Url, palm3Url, palm4Url, palm5Url];
+
+export function getBushImage(seed: number): HTMLImageElement {
+  const idx = Math.floor(tileHash(seed, 50) * BUSH_URLS.length * 0.999);
+  return loadUrl(BUSH_URLS[idx]);
+}
+
+export function getPalmImage(seed: number): HTMLImageElement {
+  const idx = Math.floor(tileHash(seed, 60) * PALM_URLS.length * 0.999);
+  return loadUrl(PALM_URLS[idx]);
 }
 
 const STICKER_SPRITE_MAP: Record<string, string> = {
