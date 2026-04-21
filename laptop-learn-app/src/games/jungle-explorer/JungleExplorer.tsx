@@ -1,7 +1,8 @@
 import { useRef, useCallback } from 'react';
 import { drawDino, drawCustomCursor, drawBackButton, drawStickerPopup, drawScore, drawEasyModeButton } from '../shared/draw';
 import type { DinoSpecies } from '../shared/draw';
-import { getFoliageImage, getBushImage, getPalmImage } from '../shared/dino-svgs';
+import { getFoliageImage, getBushImage } from '../shared/dino-svgs';
+import landscapeUrl from '../shared/sprites/backgrounds/landscape.png';
 import { spawnCelebration, updateParticles, drawParticles } from '../shared/particles';
 import { playPop, playCelebration, playSticker } from '../shared/audio';
 import { earnSticker, trackProgress } from '../shared/stickers';
@@ -164,7 +165,7 @@ export function JungleExplorer({ onBack }: { onBack: () => void }) {
     celebrating: 0,
     stickerPopup: '',
     stickerPopupTimer: 0,
-    bgGrad: null as CanvasGradient | null,
+    bgImg: null as HTMLImageElement | null,
     easyMode: isEasyMode(),
   });
 
@@ -191,50 +192,18 @@ export function JungleExplorer({ onBack }: { onBack: () => void }) {
         }
       }
 
-      // sky
-      if (!s.bgGrad) {
-        s.bgGrad = ctx.createLinearGradient(0, 0, 0, H);
-        s.bgGrad.addColorStop(0, '#87CEEB');
-        s.bgGrad.addColorStop(0.25, '#A8E6CF');
-        s.bgGrad.addColorStop(0.5, '#6BCB77');
-        s.bgGrad.addColorStop(1, '#2D5016');
+      // background landscape
+      if (!s.bgImg) {
+        const img = new Image();
+        img.src = landscapeUrl;
+        s.bgImg = img;
       }
-      ctx.fillStyle = s.bgGrad;
-      ctx.fillRect(0, 0, W, H);
-
-      // clouds
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      for (let i = 0; i < 5; i++) {
-        const cx = ((i * 180 + t * 8) % (W + 100)) - 50;
-        const cy = 30 + i * 18;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, 40 + i * 5, 14, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(cx + 25, cy - 5, 25, 12, 0, 0, Math.PI * 2);
-        ctx.fill();
+      if (s.bgImg.complete && s.bgImg.naturalWidth > 0) {
+        ctx.drawImage(s.bgImg, 0, 0, W, H);
+      } else {
+        ctx.fillStyle = '#4A7C2E';
+        ctx.fillRect(0, 0, W, H);
       }
-
-      // distant mountains
-      ctx.fillStyle = 'rgba(60,120,60,0.3)';
-      ctx.beginPath();
-      ctx.moveTo(0, H * 0.42);
-      for (let x = 0; x <= W; x += 40) {
-        ctx.lineTo(x, H * 0.32 + Math.sin(x * 0.008) * 40 + Math.sin(x * 0.02) * 15);
-      }
-      ctx.lineTo(W, H * 0.60);
-      ctx.lineTo(0, H * 0.60);
-      ctx.fill();
-
-      const groundY = H * 0.60;
-
-      // ground
-      const groundGrad = ctx.createLinearGradient(0, groundY, 0, H);
-      groundGrad.addColorStop(0, '#4A7C2E');
-      groundGrad.addColorStop(0.3, '#3D6B24');
-      groundGrad.addColorStop(1, '#2D5016');
-      ctx.fillStyle = groundGrad;
-      ctx.fillRect(0, groundY, W, H - groundY);
 
       // collect all drawable elements and sort by Y (lower Y drawn first, higher Y on top)
       type Drawable =
@@ -254,7 +223,10 @@ export function JungleExplorer({ onBack }: { onBack: () => void }) {
         drawables.push({ type: 'flower', item: f, y: f.y });
       }
       for (const dino of s.scene.dinos) {
-        drawables.push({ type: 'dino', item: dino, y: dino.y });
+        const sortY = dino.found
+          ? dino.y
+          : dino.y + dino.size * 0.15 + dino.size * 1.1 * 0.7;
+        drawables.push({ type: 'dino', item: dino, y: sortY });
       }
 
       drawables.sort((a, b) => a.y - b.y);
