@@ -22,15 +22,24 @@ interface Egg {
 }
 
 let nextEggType = 0;
-function spawnEgg(): Egg {
-  return {
-    x: 100 + Math.random() * (W - 200),
-    y: 100 + Math.random() * (H - 250),
-    size: 90 + Math.random() * 20,
-    eggType: nextEggType++ % EGG_TYPE_COUNT,
-    stage: 'whole',
-    wobble: 0,
-  };
+function spawnEgg(existing: Egg[] = []): Egg {
+  const size = 90 + Math.random() * 20;
+  let x: number, y: number;
+  let attempts = 0;
+  do {
+    x = 100 + Math.random() * (W - 200);
+    y = 140 + Math.random() * (H - 310);
+    attempts++;
+  } while (
+    attempts < 50 &&
+    existing.some((e) => {
+      const minDist = (e.size + size) * 0.45;
+      const dx = e.x - x;
+      const dy = e.y - y;
+      return dx * dx + dy * dy < minDist * minDist;
+    })
+  );
+  return { x, y, size, eggType: nextEggType++ % EGG_TYPE_COUNT, stage: 'whole', wobble: 0 };
 }
 
 function drawSpriteEgg(ctx: CanvasRenderingContext2D, egg: Egg, time: number) {
@@ -42,10 +51,14 @@ function drawSpriteEgg(ctx: CanvasRenderingContext2D, egg: Egg, time: number) {
   const h = egg.size;
   const w = h * aspect;
 
-  // wobble on click
-  const wobbleAngle = egg.wobble > 0
-    ? Math.sin((time - egg.wobble) * 20) * 0.08 * Math.max(0, 1 - (time - egg.wobble) * 3)
-    : 0;
+  // wobble on click + continuous shake when hatched
+  let wobbleAngle = 0;
+  if (egg.wobble > 0) {
+    wobbleAngle = Math.sin((time - egg.wobble) * 20) * 0.08 * Math.max(0, 1 - (time - egg.wobble) * 3);
+  }
+  if (egg.stage === 'hatched') {
+    wobbleAngle += Math.sin(time * 12) * 0.04 + Math.sin(time * 17) * 0.02;
+  }
 
   ctx.translate(egg.x, egg.y);
   ctx.rotate(wobbleAngle);
@@ -62,7 +75,11 @@ function drawSpriteEgg(ctx: CanvasRenderingContext2D, egg: Egg, time: number) {
 
 export function EggHunt({ onBack }: { onBack: () => void }) {
   const stateRef = useRef({
-    eggs: Array.from({ length: 3 }, spawnEgg),
+    eggs: (() => {
+      const eggs: Egg[] = [];
+      for (let i = 0; i < 3; i++) eggs.push(spawnEgg(eggs));
+      return eggs;
+    })(),
     particles: [] as Particle[],
     hatched: 0,
     stickerPopup: '',
@@ -171,7 +188,7 @@ export function EggHunt({ onBack }: { onBack: () => void }) {
         drawSpriteEgg(ctx, egg, mouse.time);
 
         // hover glow on clickable eggs
-        if (egg.stage === 'whole' || egg.stage === 'broken') {
+        if (egg.stage !== 'grown') {
           const dx = mouse.mouseX - egg.x;
           const dy = mouse.mouseY - egg.y;
           if (dx * dx + dy * dy < (egg.size * 0.6) ** 2) {
@@ -191,7 +208,7 @@ export function EggHunt({ onBack }: { onBack: () => void }) {
 
       // easy mode hint
       if (s.easyMode) {
-        const target = s.eggs.find((e) => e.stage === 'whole' || e.stage === 'broken');
+        const target = s.eggs.find((e) => e.stage !== 'grown');
         if (target) {
           const pulse = 0.5 + Math.sin(mouse.time * 3) * 0.5;
           ctx.save();
@@ -312,7 +329,7 @@ export function EggHunt({ onBack }: { onBack: () => void }) {
       }
 
       for (const egg of s.eggs) {
-        if (egg.stage !== 'whole' && egg.stage !== 'broken') continue;
+        if (egg.stage === 'grown') continue;
         const dx = mx - egg.x;
         const dy = my - egg.y;
         const hitMult = s.easyMode ? 0.8 : 0.5;
@@ -322,11 +339,11 @@ export function EggHunt({ onBack }: { onBack: () => void }) {
           s.particles.push(...spawnCelebration(egg.x, egg.y, 6));
 
           if (egg.stage === 'whole') {
-            // Click 1: whole → broken
             egg.stage = 'broken';
-          } else {
-            // Click 2: broken → hatched, then auto-popup
+          } else if (egg.stage === 'broken') {
             egg.stage = 'hatched';
+          } else if (egg.stage === 'hatched') {
+            egg.stage = 'grown';
             s.hatched++;
             playHatch();
             s.particles.push(...spawnCelebration(egg.x, egg.y, 20));
@@ -334,12 +351,12 @@ export function EggHunt({ onBack }: { onBack: () => void }) {
             s.hatchPopupEggType = egg.eggType;
             s.hatchPopupTimer = 2.5;
 
-            // Replace egg after a delay
             safeTimeout(() => {
               const idx = s.eggs.indexOf(egg);
               if (idx !== -1) {
                 s.eggs.splice(idx, 1);
-                s.eggs.push(spawnEgg());
+                const others = s.eggs.filter((e) => e.stage !== 'grown');
+                s.eggs.push(spawnEgg(others));
               }
             }, 2500);
 
