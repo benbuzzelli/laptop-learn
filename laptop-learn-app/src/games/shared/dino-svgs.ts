@@ -126,6 +126,15 @@ import dinoWalk6 from './sprites/animations/dino-walk-6.png';
 import dinoWalk7 from './sprites/animations/dino-walk-7.png';
 import dinoWalk8 from './sprites/animations/dino-walk-8.png';
 
+// Game icons (valley map markers)
+import eggGameIcon from './sprites/game-icons/egg-hatch-game.png';
+import dungeonGameIcon from './sprites/game-icons/dungeon-game.png';
+import spellGameIcon from './sprites/game-icons/spell-game.png';
+import boneCaveIcon from './sprites/game-icons/bone-cave.png';
+import museumIcon from './sprites/game-icons/museum.png';
+import jungleFindIcon from './sprites/game-icons/jungle-find.png';
+import volcanoGameIcon from './sprites/game-icons/volcano-game.png';
+
 // Misc sprites
 import mouseUrl from './sprites/mouse.png';
 import mouseClickUrl from './sprites/mouse-click.png';
@@ -311,6 +320,22 @@ export function getBushImage(seed: number): HTMLImageElement {
 export function getPalmImage(seed: number): HTMLImageElement {
   const idx = Math.floor(tileHash(seed, 60) * PALM_URLS.length * 0.999);
   return loadUrl(PALM_URLS[idx]);
+}
+
+const GAME_ICON_MAP: Record<string, string> = {
+  'egg-hunt': eggGameIcon,
+  'dino-dungeon': dungeonGameIcon,
+  'spell-dino': spellGameIcon,
+  'dino-match': boneCaveIcon,
+  'collection': museumIcon,
+  'jungle-explorer': jungleFindIcon,
+  'volcano-escape': volcanoGameIcon,
+};
+
+export function getGameIconImage(id: string): HTMLImageElement | null {
+  const url = GAME_ICON_MAP[id];
+  if (!url) return null;
+  return loadUrl(url);
 }
 
 const WALK_FRAMES = [

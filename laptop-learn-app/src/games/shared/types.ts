@@ -21,4 +21,4 @@ export interface Sticker {
   earned: boolean;
 }
 
-export type GameId = 'egg-hunt' | 'dino-path' | 'spell-dino' | 'volcano-escape' | 'dino-match' | 'jungle-explorer' | 'dino-dungeon' | 'collection';
+export type GameId = 'egg-hunt' | 'spell-dino' | 'volcano-escape' | 'dino-match' | 'jungle-explorer' | 'dino-dungeon' | 'collection';

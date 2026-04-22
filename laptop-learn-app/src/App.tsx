@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { HomeScreen } from './components/HomeScreen';
+import { Valley } from './components/Valley';
 import { AllDoneScreen } from './components/AllDoneScreen';
 import { EggHunt } from './games/egg-hunt/EggHunt';
-import { DinoPath } from './games/dino-path/DinoPath';
 import { SpellDino } from './games/spell-dino/SpellDino';
 import { VolcanoEscape } from './games/volcano-escape/VolcanoEscape';
 import { DinoMatch } from './games/dino-match/DinoMatch';
@@ -10,8 +9,10 @@ import { JungleExplorer } from './games/jungle-explorer/JungleExplorer';
 import { DinoDungeon } from './games/dino-dungeon/DinoDungeon';
 import { DinoCollection } from './components/DinoCollection';
 import { ParentDashboard } from './components/ParentDashboard';
+import { DinoCreation } from './components/DinoCreation';
 import { initAudio } from './games/shared/audio';
-import { profileKey } from './games/shared/profile';
+import { profileKey, getActiveProfile } from './games/shared/profile';
+import { hasAvatar } from './games/shared/avatar';
 import type { GameId } from './games/shared/types';
 
 function getTimerMinutes(): number {
@@ -39,6 +40,8 @@ function App() {
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const [showParentDash, setShowParentDash] = useState(false);
   const [timerVersion, setTimerVersion] = useState(0);
+  const [needsAvatar, setNeedsAvatar] = useState(() => !hasAvatar());
+  const [avatarProfile, setAvatarProfile] = useState(getActiveProfile());
 
   // long-press state for fullscreen button
   const longPressRef = useRef<number | null>(null);
@@ -226,11 +229,17 @@ function App() {
     >
       {sessionExpired ? (
         <AllDoneScreen />
+      ) : needsAvatar ? (
+        <DinoCreation
+          key={avatarProfile}
+          onDone={() => {
+            setNeedsAvatar(false);
+          }}
+        />
       ) : (
         <>
-          {currentGame === null && <HomeScreen onSelectGame={handleSelectGame} />}
+          {currentGame === null && <Valley onSelectGame={handleSelectGame} />}
           {currentGame === 'egg-hunt' && <EggHunt key={gameKey} onBack={handleBack} />}
-          {currentGame === 'dino-path' && <DinoPath key={gameKey} onBack={handleBack} />}
           {currentGame === 'spell-dino' && <SpellDino key={gameKey} onBack={handleBack} />}
           {currentGame === 'volcano-escape' && <VolcanoEscape key={gameKey} onBack={handleBack} />}
           {currentGame === 'dino-match' && <DinoMatch key={gameKey} onBack={handleBack} />}
@@ -342,7 +351,15 @@ function App() {
       {/* Parent dashboard overlay */}
       {showParentDash && (
         <ParentDashboard
-          onClose={() => setShowParentDash(false)}
+          onClose={() => {
+            setShowParentDash(false);
+            // re-check avatar in case the parent switched profiles
+            const profile = getActiveProfile();
+            if (profile !== avatarProfile) {
+              setAvatarProfile(profile);
+            }
+            setNeedsAvatar(!hasAvatar());
+          }}
           onTimerRestart={handleTimerRestart}
         />
       )}
