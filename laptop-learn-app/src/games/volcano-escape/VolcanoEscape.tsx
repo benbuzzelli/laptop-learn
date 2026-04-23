@@ -195,7 +195,7 @@ export function VolcanoEscape({ onBack }: { onBack: () => void }) {
 
     s.playerR = nr;
     s.playerC = nc;
-    if (dr === -1) s.facing = 'down';
+    if (dr === -1) s.facing = 'up';
     else if (dr === 1) s.facing = 'down';
     else if (dc === -1) s.facing = 'left';
     else if (dc === 1) s.facing = 'right';

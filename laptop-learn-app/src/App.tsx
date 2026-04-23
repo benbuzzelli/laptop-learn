@@ -8,11 +8,26 @@ import { DinoMatch } from './games/dino-match/DinoMatch';
 import { JungleExplorer } from './games/jungle-explorer/JungleExplorer';
 import { DinoDungeon } from './games/dino-dungeon/DinoDungeon';
 import { DinoCollection } from './components/DinoCollection';
+import { MyDino } from './components/MyDino';
 import { ParentDashboard } from './components/ParentDashboard';
 import { DinoCreation } from './components/DinoCreation';
+import { LevelEditor } from './components/LevelEditor';
+import { TesterNotes } from './components/TesterNotes';
+import { QuestOverlay } from './components/QuestOverlay';
+import type { QuestOverlayMode } from './components/QuestOverlay';
+import { QuillBubble, emitQuillBubble } from './components/QuillBubble';
+import { preloadQuillEmotes } from './games/shared/quill';
 import { initAudio } from './games/shared/audio';
 import { profileKey, getActiveProfile } from './games/shared/profile';
 import { hasAvatar } from './games/shared/avatar';
+import {
+  getTodaysQuest,
+  completedToday,
+  acceptQuest,
+  getQuestById,
+  QUEST_GAME_TO_APP,
+} from './games/shared/quests';
+import { consumePendingQuestEvent } from './games/shared/stickers';
 import type { GameId } from './games/shared/types';
 
 function getTimerMinutes(): number {
@@ -33,7 +48,15 @@ function getTimerMinutes(): number {
 }
 
 function App() {
+  // Dev-only route: ?editor=1 opens the dungeon room editor, bypassing the rest of the app.
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('editor') === '1') {
+    return <LevelEditor />;
+  }
+
   const [currentGame, setCurrentGame] = useState<GameId | null>(null);
+  const [showMyDino, setShowMyDino] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [questOverlay, setQuestOverlay] = useState<QuestOverlayMode>(null);
   const [gameKey, setGameKey] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -50,6 +73,11 @@ function App() {
   type TransitionPhase = 'idle' | 'fade-out' | 'fade-in';
   const [transPhase, setTransPhase] = useState<TransitionPhase>('idle');
   const pendingNavRef = useRef<GameId | null | undefined>(undefined);
+
+  // preload Quill emotes once so the first bubble isn't a blank frame
+  useEffect(() => {
+    preloadQuillEmotes();
+  }, []);
 
   // --- Keyboard blocker ---
   useEffect(() => {
@@ -214,6 +242,84 @@ function App() {
 
   const overlayOpacity = transPhase === 'fade-out' ? 1 : 0;
 
+  // When returning to the Valley (currentGame became null), drain any pending
+  // quest advancement event and show the appropriate overlay.
+  useEffect(() => {
+    if (currentGame !== null) return;
+    const evt = consumePendingQuestEvent();
+    if (!evt) return;
+    const quest = evt.questId ? getQuestById(evt.questId) : null;
+    if (!quest) return;
+    if (evt.completed) {
+      setQuestOverlay({ kind: 'questComplete', quest });
+    } else if (evt.nextGameId) {
+      const nextStep = quest.steps.find((s) => s.gameId === evt.nextGameId);
+      if (nextStep) {
+        const stepIndex = quest.steps.indexOf(nextStep);
+        setQuestOverlay({ kind: 'stepComplete', quest, nextStep, stepIndex });
+      }
+    }
+  }, [currentGame]);
+
+  const handleOpenQuestGiver = useCallback(() => {
+    const quest = getTodaysQuest();
+    setQuestOverlay({
+      kind: 'intro',
+      quest,
+      alreadyCompletedToday: completedToday(),
+    });
+  }, []);
+
+  const handleAcceptQuest = useCallback(() => {
+    if (questOverlay?.kind !== 'intro') return;
+    const quest = questOverlay.quest;
+    acceptQuest(quest.id);
+    const firstStep = quest.steps[0];
+    setQuestOverlay(null);
+    if (firstStep) {
+      const appGameId = QUEST_GAME_TO_APP[firstStep.gameId] as GameId;
+      initAudio();
+      emitQuillBubble({
+        emote: firstStep.emote ?? 'confident-ready',
+        message: `Let's do it! ${firstStep.callToAction}`,
+        durationMs: 5000,
+      });
+      navigateTo(appGameId);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questOverlay]);
+
+  const handleQuestGoToGame = useCallback(
+    (gameId: string) => {
+      const appGameId = (QUEST_GAME_TO_APP[gameId as keyof typeof QUEST_GAME_TO_APP] ?? gameId) as GameId;
+      setQuestOverlay(null);
+      initAudio();
+      navigateTo(appGameId);
+    },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const getLocationLabel = useCallback((): string => {
+    if (sessionExpired) return 'All Done screen';
+    if (needsAvatar) return 'Dino Creation';
+    if (showParentDash) return 'Parent Dashboard';
+    if (currentGame) {
+      const labels: Record<GameId, string> = {
+        'egg-hunt': 'Egg Hunt',
+        'spell-dino': 'Spell Dino',
+        'volcano-escape': 'Volcano Escape',
+        'dino-match': 'Dino Match',
+        'jungle-explorer': 'Jungle Explorer',
+        'dino-dungeon': 'Dino Dungeon',
+        'collection': 'Dino Museum',
+      };
+      return labels[currentGame];
+    }
+    if (showMyDino) return 'My Dino';
+    return 'Dino Valley';
+  }, [sessionExpired, needsAvatar, showParentDash, currentGame, showMyDino]);
+
   return (
     <div
       style={{
@@ -238,7 +344,16 @@ function App() {
         />
       ) : (
         <>
-          {currentGame === null && <Valley onSelectGame={handleSelectGame} />}
+          {currentGame === null && !showMyDino && (
+            <Valley
+              onSelectGame={handleSelectGame}
+              onOpenMyDino={() => setShowMyDino(true)}
+              onOpenQuestGiver={handleOpenQuestGiver}
+            />
+          )}
+          {currentGame === null && showMyDino && (
+            <MyDino onBack={() => setShowMyDino(false)} />
+          )}
           {currentGame === 'egg-hunt' && <EggHunt key={gameKey} onBack={handleBack} />}
           {currentGame === 'spell-dino' && <SpellDino key={gameKey} onBack={handleBack} />}
           {currentGame === 'volcano-escape' && <VolcanoEscape key={gameKey} onBack={handleBack} />}
@@ -347,6 +462,51 @@ function App() {
           }}
         />
       )}
+
+      {/* Tester notes button (bottom-left) */}
+      <button
+        onClick={() => setShowNotes(true)}
+        title="Tester notes"
+        style={{
+          position: 'absolute',
+          bottom: 12,
+          left: 12,
+          zIndex: 20,
+          background: 'rgba(0,0,0,0.4)',
+          border: '2px solid rgba(255,255,255,0.3)',
+          borderRadius: 12,
+          color: '#fff',
+          fontSize: 26,
+          width: 56,
+          height: 56,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: 0.75,
+          transition: 'opacity 200ms',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.75'; }}
+      >
+        📝
+      </button>
+
+      <TesterNotes
+        open={showNotes}
+        onClose={() => setShowNotes(false)}
+        getLocation={getLocationLabel}
+      />
+
+      <QuestOverlay
+        mode={questOverlay}
+        onClose={() => setQuestOverlay(null)}
+        onAccept={handleAcceptQuest}
+        onContinue={() => setQuestOverlay(null)}
+        onGoToGame={handleQuestGoToGame}
+      />
+
+      <QuillBubble />
 
       {/* Parent dashboard overlay */}
       {showParentDash && (

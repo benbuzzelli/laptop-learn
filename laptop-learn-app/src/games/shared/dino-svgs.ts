@@ -114,17 +114,33 @@ import palm4Url from './sprites/foliage/palm-4.png';
 import palm5Url from './sprites/foliage/palm-5.png';
 import bonesBushUrl from './sprites/foliage/bones-bush.png';
 import fossilUrl from './sprites/foliage/fossil.png';
+
+// Dungeon set dressing
+import altarUrl from './sprites/dungeon-assets/alter.png';
+import plateIdleUrl from './sprites/dungeon-assets/pressure-plate.png';
+import platePressedUrl from './sprites/dungeon-assets/pressure-plate-pressed.png';
+import keyRedUrl from './sprites/dungeon-assets/red-key.png';
+import keyBlueUrl from './sprites/dungeon-assets/blue-key.png';
+import keyYellowUrl from './sprites/dungeon-assets/yellow-key.png';
+import dungeonEggUrl from './sprites/dungeon-assets/egg.png';
+import dungeonEggOpenedUrl from './sprites/dungeon-assets/egg-opened.png';
+
+// Fossil / bone sprites (used for the dungeon fossil-assembly puzzle)
+import bone1Url from './sprites/bones/bone-1.png';
+import bone2Url from './sprites/bones/bone-2.png';
+import boneRibsUrl from './sprites/bones/ribs.png';
+import boneSpineUrl from './sprites/bones/spine.png';
+import bonePileUrl from './sprites/bones/bone-pile.png';
+import boneFootUrl from './sprites/bones/foot-bone.png';
+import bonePelvisUrl from './sprites/bones/pelvis.png';
+import boneToothUrl from './sprites/bones/tooth.png';
 import volcanoBushUrl from './sprites/foliage/volcano-bush.png';
 
 // Walk animation sprites
-import dinoWalk1 from './sprites/animations/dino-walk-1.png';
-import dinoWalk2 from './sprites/animations/dino-walk-2.png';
-import dinoWalk3 from './sprites/animations/dino-walk-3.png';
-import dinoWalk4 from './sprites/animations/dino-walk-4.png';
-import dinoWalk5 from './sprites/animations/dino-walk-5.png';
-import dinoWalk6 from './sprites/animations/dino-walk-6.png';
-import dinoWalk7 from './sprites/animations/dino-walk-7.png';
-import dinoWalk8 from './sprites/animations/dino-walk-8.png';
+import rexWalk1 from './sprites/animations/rex/walk-1.png';
+import rexWalk2 from './sprites/animations/rex/walk-2.png';
+import rexWalk3 from './sprites/animations/rex/walk-3.png';
+import rexWalk4 from './sprites/animations/rex/walk-4.png';
 
 // Game icons (valley map markers)
 import eggGameIcon from './sprites/game-icons/egg-hatch-game.png';
@@ -268,6 +284,12 @@ export function getGrassTileImage(r: number, c: number): HTMLImageElement {
   return loadUrl(grassUrl);
 }
 
+// Base (uniform) grass tile — no random variation. Used by the dungeon game
+// where we want a clean, uncluttered floor.
+export function getBaseGrassTileImage(): HTMLImageElement {
+  return loadUrl(grassUrl);
+}
+
 export function getWallTileImage(r: number, c: number): HTMLImageElement {
   const idx = Math.floor(tileHash(r, c) * WALL_TILES.length * 0.999);
   return loadUrl(WALL_TILES[idx]);
@@ -339,8 +361,7 @@ export function getGameIconImage(id: string): HTMLImageElement | null {
 }
 
 const WALK_FRAMES = [
-  dinoWalk1, dinoWalk2, dinoWalk3, dinoWalk4,
-  dinoWalk5, dinoWalk6, dinoWalk7, dinoWalk8,
+  rexWalk1, rexWalk2, rexWalk3, rexWalk4,
 ];
 
 export function getWalkDinoFrame(frame: number): HTMLImageElement {
@@ -348,6 +369,48 @@ export function getWalkDinoFrame(frame: number): HTMLImageElement {
 }
 
 export const WALK_FRAME_COUNT = WALK_FRAMES.length;
+
+// Individual fossil pieces — cycled so scattered fossils look varied.
+const FOSSIL_BONES = [
+  bone1Url,
+  bone2Url,
+  boneRibsUrl,
+  boneSpineUrl,
+  boneFootUrl,
+  bonePelvisUrl,
+  boneToothUrl,
+];
+
+export function getFossilBoneImage(seed: number): HTMLImageElement {
+  const idx = Math.floor(Math.abs(tileHash(seed, 77)) * FOSSIL_BONES.length) % FOSSIL_BONES.length;
+  return loadUrl(FOSSIL_BONES[idx]);
+}
+
+export function getBonePileImage(): HTMLImageElement {
+  return loadUrl(bonePileUrl);
+}
+
+export function getAltarImage(): HTMLImageElement {
+  return loadUrl(altarUrl);
+}
+
+export function getPressurePlateImage(pressed: boolean): HTMLImageElement {
+  return loadUrl(pressed ? platePressedUrl : plateIdleUrl);
+}
+
+const KEY_SPRITE_BY_COLOR: Record<string, string> = {
+  red: keyRedUrl,
+  blue: keyBlueUrl,
+  yellow: keyYellowUrl,
+};
+
+export function getDungeonKeyImage(color: 'red' | 'blue' | 'yellow'): HTMLImageElement {
+  return loadUrl(KEY_SPRITE_BY_COLOR[color] ?? keyRedUrl);
+}
+
+export function getDungeonEggImage(opened: boolean): HTMLImageElement {
+  return loadUrl(opened ? dungeonEggOpenedUrl : dungeonEggUrl);
+}
 
 const STICKER_SPRITE_MAP: Record<string, string> = {
   'egg-hunt-1': egg1,

@@ -1,7 +1,7 @@
 import { useRef, useCallback } from 'react';
 import { drawDino, drawWalkDino, drawCustomCursor, drawBackButton, drawStickerPopup, drawScore, drawEasyModeButton } from '../shared/draw';
 import type { DinoSpecies, WalkDirection } from '../shared/draw';
-import { getWallTileImage, getGrassTileImage, getFinishImage, getArrowImage } from '../shared/dino-svgs';
+import { getWallTileImage, getBaseGrassTileImage, getFinishImage, getArrowImage, getFossilBoneImage, getAltarImage, getPressurePlateImage, getDungeonKeyImage, getDungeonEggImage } from '../shared/dino-svgs';
 import { spawnCelebration, updateParticles, drawParticles } from '../shared/particles';
 import { playStep, playCelebration, playSticker, playPop, playSuccess, playMismatch } from '../shared/audio';
 import { earnSticker, trackProgress } from '../shared/stickers';
@@ -11,6 +11,25 @@ import type { Difficulty } from '../shared/difficulty';
 import { trackDinoEncounter } from '../shared/collection';
 import { useGameCanvas } from '../shared/useGameCanvas';
 import type { Particle, Point } from '../shared/types';
+import { buildBspRoom } from './bsp';
+import { buildTemplateLevel } from './from-template';
+import { templateForLevel } from './templates';
+
+type DungeonGenerator = 'tree' | 'bsp' | 'template';
+const DUNGEON_GEN_KEY = 'dinoLearn_dungeonGen';
+function getDungeonGenerator(): DungeonGenerator {
+  try {
+    const v = localStorage.getItem(DUNGEON_GEN_KEY);
+    if (v === 'bsp' || v === 'template') return v;
+  } catch {}
+  return 'tree';
+}
+
+// Exit opens when: difficulty is hard (doors gate the path), OR the room has no
+// treasures to pick up (e.g. BSP skeleton rooms in Phase 1 of the generator refactor).
+function computeInitialExitOpen(room: { treasures: unknown[] }, difficulty: Difficulty): boolean {
+  return difficulty === 'hard' || room.treasures.length === 0;
+}
 
 const W = 800;
 const H = 600;
@@ -18,7 +37,7 @@ const COLS = 15;
 const ROWS = 11;
 const TILE = 50;
 
-type DungeonCell = 'empty' | 'wall';
+type DungeonCell = 'empty' | 'wall' | 'grass' | 'pit';
 
 type GuardKind = 'patrol' | 'watcher';
 
@@ -78,6 +97,30 @@ interface PushBlock {
   c: number;
 }
 
+interface Fossil {
+  r: number;
+  c: number;
+  collected: boolean;
+}
+
+interface Altar {
+  r: number;
+  c: number;
+  requires: number;
+  targetR: number;
+  targetC: number;
+  used: boolean;
+}
+
+interface DungeonEgg {
+  r: number;
+  c: number;
+  collected: boolean;  // picked up by the player
+  hatched: boolean;    // dropped on a plate and hatched
+  hatchR?: number;     // where the baby dino ended up
+  hatchC?: number;
+}
+
 interface DungeonRoom {
   grid: DungeonCell[][];
   guards: Guard[];
@@ -91,6 +134,9 @@ interface DungeonRoom {
   plate: PressurePlate | null;
   plateGate: PlateGate | null;
   blocks: PushBlock[];
+  fossils: Fossil[];
+  altar: Altar | null;
+  eggs: DungeonEgg[];
 }
 
 const PLATE_COLOR = '#66BB6A';
@@ -124,6 +170,17 @@ const TREASURE_EMOJIS: Record<string, string> = {
 };
 
 function generateRoom(level: number, difficulty: Difficulty = 'medium'): DungeonRoom {
+  // Dungeon generator flag (localStorage 'dinoLearn_dungeonGen'):
+  //   'tree'     — default, procedural maze (current)
+  //   'bsp'      — BSP skeleton, empty rooms for testing (Phase 1 of gen refactor)
+  //   'template' — hand-authored arena templates (the redesign — see DUNGEON_REDESIGN.md)
+  const gen = getDungeonGenerator();
+  if (gen === 'template') {
+    return buildTemplateLevel(level, difficulty);
+  }
+  if (gen === 'bsp') {
+    return buildBspRoom(level, difficulty);
+  }
   // retry generation until we produce a provably solvable room
   for (let attempt = 0; attempt < 10; attempt++) {
     const room = buildRoom(level, difficulty);
@@ -141,19 +198,38 @@ function generateRoom(level: number, difficulty: Difficulty = 'medium'): Dungeon
 }
 
 function isRoomSolvable(room: DungeonRoom): boolean {
-  // BFS over (r, c, keyMask, platePressed). Treats blocks as immovable walls
-  // (pushing can only open more paths, so this is a conservative lower bound).
+  // BFS over (r, c, keyMask, carryingEgg, eggOnPlate). Plates are non-latching,
+  // so the gate only stays open while something sits on the plate. Tracked:
+  //   - carryingEgg: the player is walking with an egg; they'll deposit it
+  //     when they step on the plate.
+  //   - eggOnPlate: an egg has been hatched on the plate (permanent weight).
+  // Blocks are treated as immovable walls in this conservative check — if the
+  // block placement happens to sit on the plate at spawn, that counts as
+  // permanent weight.
   const keyColors = [...new Set(room.keys.map((k) => k.color))];
   const keyBit: Partial<Record<KeyColor, number>> = {};
   keyColors.forEach((col, i) => { keyBit[col] = 1 << i; });
   const blockSet = new Set(room.blocks.map((b) => `${b.r},${b.c}`));
+  const staticBlockOnPlate = !!room.plate && blockSet.has(`${room.plate.r},${room.plate.c}`);
 
-  type State = { r: number; c: number; keys: number; plate: boolean };
-  const stateKey = (st: State) => `${st.r},${st.c},${st.keys},${st.plate ? 1 : 0}`;
+  type State = { r: number; c: number; keys: number; carryingEgg: boolean; eggOnPlate: boolean };
+  const stateKey = (st: State) => `${st.r},${st.c},${st.keys},${st.carryingEgg ? 1 : 0},${st.eggOnPlate ? 1 : 0}`;
 
-  const initial: State = { r: room.startR, c: room.startC, keys: 0, plate: false };
+  const initial: State = {
+    r: room.startR,
+    c: room.startC,
+    keys: 0,
+    carryingEgg: false,
+    eggOnPlate: staticBlockOnPlate,
+  };
   const seen = new Set<string>([stateKey(initial)]);
   const queue: State[] = [initial];
+
+  const platePressed = (st: State) => {
+    if (!room.plate) return false;
+    if (st.eggOnPlate) return true;
+    return st.r === room.plate.r && st.c === room.plate.c;
+  };
 
   while (queue.length > 0) {
     const st = queue.shift()!;
@@ -163,7 +239,7 @@ function isRoomSolvable(room: DungeonRoom): boolean {
       const nr = st.r + dr;
       const nc = st.c + dc;
       if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
-      if (room.grid[nr][nc] === 'wall') continue;
+      if (room.grid[nr][nc] === 'wall' || room.grid[nr][nc] === 'pit') continue;
       if (blockSet.has(`${nr},${nc}`)) continue;
 
       const door = room.doors.find((d) => d.r === nr && d.c === nc);
@@ -171,7 +247,13 @@ function isRoomSolvable(room: DungeonRoom): boolean {
         const bit = keyBit[door.color];
         if (bit === undefined || (st.keys & bit) === 0) continue;
       }
-      if (room.plateGate && room.plateGate.r === nr && room.plateGate.c === nc && !st.plate) continue;
+      // Gate is open iff plate is pressed at the time of the move.
+      if (
+        room.plateGate &&
+        room.plateGate.r === nr &&
+        room.plateGate.c === nc &&
+        !platePressed(st)
+      ) continue;
 
       let newKeys = st.keys;
       const pickedKey = room.keys.find((k) => k.r === nr && k.c === nc);
@@ -179,14 +261,33 @@ function isRoomSolvable(room: DungeonRoom): boolean {
         const bit = keyBit[pickedKey.color];
         if (bit !== undefined) newKeys |= bit;
       }
-      let newPlate = st.plate;
-      if (room.plate && room.plate.r === nr && room.plate.c === nc) newPlate = true;
 
-      const next: State = { r: nr, c: nc, keys: newKeys, plate: newPlate };
-      const sk = stateKey(next);
-      if (!seen.has(sk)) {
-        seen.add(sk);
-        queue.push(next);
+      // Branching: if an egg sits at (nr, nc) and we're not carrying one, try
+      // both picking it up and leaving it. If we're carrying an egg and (nr,nc)
+      // is the plate, depositing it is the obvious win — branch into that too.
+      const eggAvailable = !st.carryingEgg && !st.eggOnPlate
+        && room.eggs.some((e) => e.r === nr && e.c === nc);
+      const canDepositHere = st.carryingEgg && room.plate
+        && room.plate.r === nr && room.plate.c === nc;
+
+      const nextStates: State[] = [];
+      // Base transition — no pickup, no deposit
+      nextStates.push({ r: nr, c: nc, keys: newKeys, carryingEgg: st.carryingEgg, eggOnPlate: st.eggOnPlate });
+      // Pick up egg
+      if (eggAvailable) {
+        nextStates.push({ r: nr, c: nc, keys: newKeys, carryingEgg: true, eggOnPlate: st.eggOnPlate });
+      }
+      // Deposit egg on plate
+      if (canDepositHere) {
+        nextStates.push({ r: nr, c: nc, keys: newKeys, carryingEgg: false, eggOnPlate: true });
+      }
+
+      for (const next of nextStates) {
+        const sk = stateKey(next);
+        if (!seen.has(sk)) {
+          seen.add(sk);
+          queue.push(next);
+        }
       }
     }
   }
@@ -331,9 +432,9 @@ function buildRoom(level: number, difficulty: Difficulty = 'medium'): DungeonRoo
 
   const guards: Guard[] = [];
   // prefer placing guards in less-trafficked spots: off the critical path first
-  const shuffled = corridorCells.sort(() => Math.random() - 0.5);
-  const offPath = shuffled.filter(({ r, c }) => !criticalCells.has(`${r},${c}`));
-  const onPath = shuffled.filter(({ r, c }) => criticalCells.has(`${r},${c}`));
+  const shuffledCorridors = corridorCells.sort(() => Math.random() - 0.5);
+  const offPath = shuffledCorridors.filter(({ r, c }) => !criticalCells.has(`${r},${c}`));
+  const onPath = shuffledCorridors.filter(({ r, c }) => criticalCells.has(`${r},${c}`));
   const guardCandidates = [...offPath, ...onPath];
 
   // watchers only exist in medium (rarely) and hard (more common)
@@ -513,7 +614,7 @@ function buildRoom(level: number, difficulty: Difficulty = 'medium'): DungeonRoo
     }
   }
 
-  return { grid, guards, treasures, startR: 1, startC: 1, exitR, exitC, keys, doors, plate, plateGate, blocks };
+  return { grid, guards, treasures, startR: 1, startC: 1, exitR, exitC, keys, doors, plate, plateGate, blocks, fossils: [], altar: null, eggs: [] };
 }
 
 function shortestPath(grid: DungeonCell[][], sr: number, sc: number, er: number, ec: number): { r: number; c: number }[] {
@@ -632,6 +733,9 @@ function guardMoveInterval(difficulty: Difficulty): number {
 
 function canGuardSee(guard: Guard, pr: number, pc: number, grid: DungeonCell[][], difficulty: Difficulty): boolean {
   if (guard.alertTimer > 0) return false;
+  // if the player is standing in tall grass, they're hidden from any guard
+  if (grid[pr]?.[pc] === 'grass') return false;
+
   const range = visionRange(difficulty, guard.kind);
   let dr = 0;
   let dc = 0;
@@ -657,10 +761,12 @@ function canGuardSee(guard: Guard, pr: number, pc: number, grid: DungeonCell[][]
 }
 
 export function DinoDungeon({ onBack }: { onBack: () => void }) {
+  const initialDifficulty = getDifficulty();
+  const initialRoom = generateRoom(0, initialDifficulty);
   const stateRef = useRef({
-    room: generateRoom(0, getDifficulty()),
-    playerR: 1,
-    playerC: 1,
+    room: initialRoom,
+    playerR: initialRoom.startR,
+    playerC: initialRoom.startC,
     particles: [] as Particle[],
     completed: 0,
     level: 0,
@@ -672,14 +778,16 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
     stickerPopupTimer: 0,
     keysHeld: new Set<string>(),
     easyMode: isEasyMode(),
-    difficulty: getDifficulty() as Difficulty,
+    difficulty: initialDifficulty,
     totalTreasures: 0,
-    exitOpen: getDifficulty() === 'hard',
+    exitOpen: computeInitialExitOpen(initialRoom, initialDifficulty),
     facing: 'down' as WalkDirection,
     inventory: new Set<KeyColor>(),
     lockedBumpTimer: 0,
     running: false,
     noisePulses: [] as { x: number; y: number; age: number }[],
+    fossilsInInventory: 0,
+    carriedEggIdx: null as number | null,
   });
 
   const tryMove = useCallback((dr: number, dc: number) => {
@@ -689,6 +797,11 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
     const nc = s.playerC + dc;
     if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) return;
     if (s.room.grid[nr][nc] === 'wall') return;
+    if (s.room.grid[nr][nc] === 'pit') {
+      // Pit blocks player; must be filled by pushing a block in first.
+      s.lockedBumpTimer = 0.2;
+      return;
+    }
 
     // check for a closed door at the target cell
     const door = s.room.doors.find((d) => d.r === nr && d.c === nc && !d.open);
@@ -735,24 +848,33 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
         s.lockedBumpTimer = 0.2;
         return;
       }
+      // If the destination is a pit, the block fills it: block is consumed,
+      // the pit tile becomes walkable floor.
+      if (s.room.grid[br][bc] === 'pit') {
+        s.room.grid[br][bc] = 'empty';
+        s.room.blocks.splice(blockIdx, 1);
+        playSuccess();
+        const fx = bc * TILE + TILE / 2;
+        const fy = br * TILE + TILE / 2;
+        s.particles.push(...spawnCelebration(fx, fy, 14));
+        return;
+      }
       // push it
       block.r = br;
       block.c = bc;
       playPop();
 
-      // if the block landed on the plate, activate it too
-      if (s.room.plate && !s.room.plate.pressed && s.room.plate.r === br && s.room.plate.c === bc) {
-        s.room.plate.pressed = true;
-        if (s.room.plateGate) s.room.plateGate.open = true;
-        playSuccess();
-        s.particles.push(...spawnCelebration(bc * TILE + TILE / 2, br * TILE + TILE / 2, 15));
-      }
+      // Plate state is recomputed each frame — if the block landed on the plate,
+      // the per-frame update in onDraw will press it automatically.
     }
 
     s.playerR = nr;
     s.playerC = nc;
-    s.moveTimer = s.running ? 0.08 : 0.15;
-    if (dr === -1) s.facing = 'down';
+    // Carrying an egg slows the player — eggs are delicate.
+    const carrying = s.carriedEggIdx !== null;
+    const baseTimer = s.running ? 0.08 : 0.15;
+    s.moveTimer = carrying ? baseTimer * 1.6 : baseTimer;
+    if (dr === -1) s.facing = 'up';
     else if (dr === 1) s.facing = 'down';
     else if (dc === -1) s.facing = 'left';
     else if (dc === 1) s.facing = 'right';
@@ -791,14 +913,53 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
       }
     }
 
-    // check pressure plate
-    if (s.room.plate && !s.room.plate.pressed && s.room.plate.r === nr && s.room.plate.c === nc) {
-      s.room.plate.pressed = true;
-      if (s.room.plateGate) s.room.plateGate.open = true;
-      playSuccess();
+    // Plate/gate state is re-evaluated each frame in the main draw loop
+    // (see updatePlateAndGate below) — plates are non-latching, so stepping
+    // on and off is a dynamic press/release.
+
+    // (egg pickup + hatch are now manual — press E while standing on an egg to
+    //  pick it up, press E again to drop at the current tile. Dropping onto a
+    //  plate still triggers the hatch.)
+
+    // fossil pickup
+    for (const fossil of s.room.fossils) {
+      if (!fossil.collected && fossil.r === nr && fossil.c === nc) {
+        fossil.collected = true;
+        s.fossilsInInventory++;
+        playPop();
+        const px = nc * TILE + TILE / 2;
+        const py = nr * TILE + TILE / 2;
+        s.particles.push(...spawnCelebration(px, py, 10));
+        break;
+      }
+    }
+
+    // altar activation — consume fossils, turn the target tile into floor
+    if (
+      s.room.altar &&
+      !s.room.altar.used &&
+      s.room.altar.r === nr &&
+      s.room.altar.c === nc &&
+      s.fossilsInInventory >= s.room.altar.requires
+    ) {
+      s.fossilsInInventory -= s.room.altar.requires;
+      s.room.altar.used = true;
+      const tr = s.room.altar.targetR;
+      const tc = s.room.altar.targetC;
+      if (tr >= 0 && tr < ROWS && tc >= 0 && tc < COLS) {
+        if (s.room.grid[tr][tc] === 'wall' || s.room.grid[tr][tc] === 'pit') {
+          s.room.grid[tr][tc] = 'empty';
+        }
+      }
+      playCelebration();
       const px = nc * TILE + TILE / 2;
       const py = nr * TILE + TILE / 2;
-      s.particles.push(...spawnCelebration(px, py, 15));
+      s.particles.push(...spawnCelebration(px, py, 22));
+      if (tr >= 0 && tr < ROWS && tc >= 0 && tc < COLS) {
+        const tx = tc * TILE + TILE / 2;
+        const ty = tr * TILE + TILE / 2;
+        s.particles.push(...spawnCelebration(tx, ty, 16));
+      }
     }
 
     // check treasure pickup
@@ -847,6 +1008,66 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
     }
   }, []);
 
+  // Manual egg pickup/drop — press E to toggle.
+  const toggleEggCarry = useCallback(() => {
+    const s = stateRef.current;
+    if (s.caught || s.celebrating > 0) return;
+
+    if (s.carriedEggIdx !== null) {
+      // Dropping at the current tile.
+      // Disallow if another uncollected egg is already here (prevents stacking).
+      const otherHere = s.room.eggs.some((e, i) =>
+        i !== s.carriedEggIdx &&
+        !e.hatched &&
+        !e.collected &&
+        e.r === s.playerR &&
+        e.c === s.playerC,
+      );
+      if (otherHere) {
+        s.lockedBumpTimer = 0.2;
+        return;
+      }
+
+      const egg = s.room.eggs[s.carriedEggIdx];
+      egg.r = s.playerR;
+      egg.c = s.playerC;
+      egg.collected = false;
+
+      const px = s.playerC * TILE + TILE / 2;
+      const py = s.playerR * TILE + TILE / 2;
+
+      // If the drop cell is a plate, hatch the egg. The hatched baby sits on
+      // the plate permanently, which the per-frame plate/gate update treats as
+      // permanent weight — so the gate stays open.
+      if (s.room.plate && s.room.plate.r === s.playerR && s.room.plate.c === s.playerC) {
+        egg.hatched = true;
+        egg.hatchR = s.playerR;
+        egg.hatchC = s.playerC;
+        playSuccess();
+        s.particles.push(...spawnCelebration(px, py, 18));
+      } else {
+        playPop();
+        s.particles.push(...spawnCelebration(px, py, 5));
+      }
+      s.carriedEggIdx = null;
+      return;
+    }
+
+    // Pickup — check if standing on an egg.
+    for (let i = 0; i < s.room.eggs.length; i++) {
+      const egg = s.room.eggs[i];
+      if (!egg.collected && !egg.hatched && egg.r === s.playerR && egg.c === s.playerC) {
+        egg.collected = true;
+        s.carriedEggIdx = i;
+        playPop();
+        const px = s.playerC * TILE + TILE / 2;
+        const py = s.playerR * TILE + TILE / 2;
+        s.particles.push(...spawnCelebration(px, py, 6));
+        return;
+      }
+    }
+  }, []);
+
   const { canvasRef, safeTimeout } = useGameCanvas({
     width: W,
     height: H,
@@ -855,6 +1076,11 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
       const s = stateRef.current;
       if (e.key === 'Shift') {
         s.running = true;
+        return;
+      }
+      if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        toggleEggCarry();
         return;
       }
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
@@ -884,6 +1110,31 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
       if (s.moveTimer > 0) s.moveTimer -= dt;
       if (s.lockedBumpTimer > 0) s.lockedBumpTimer -= dt;
       s.particles = updateParticles(s.particles, dt);
+
+      // --- plate / gate update (non-latching) ---
+      // Plate is pressed while there's weight on it right now: the player is
+      // standing on it, a push-block sits on it, or an egg has hatched on it.
+      // The gate mirrors the plate's state — step off, plate un-presses, gate
+      // closes. Drop an egg on the plate to keep it pressed while you move.
+      if (s.room.plate) {
+        const pr = s.room.plate.r;
+        const pc = s.room.plate.c;
+        const playerOn = s.playerR === pr && s.playerC === pc;
+        const blockOn = s.room.blocks.some((b) => b.r === pr && b.c === pc);
+        const hatchedOn = s.room.eggs.some(
+          (e) => e.hatched && e.hatchR === pr && e.hatchC === pc,
+        );
+        const pressed = playerOn || blockOn || hatchedOn;
+        const was = s.room.plate.pressed;
+        s.room.plate.pressed = pressed;
+        if (s.room.plateGate) s.room.plateGate.open = pressed;
+        if (!was && pressed) {
+          playSuccess();
+          s.particles.push(...spawnCelebration(pc * TILE + TILE / 2, pr * TILE + TILE / 2, 8));
+        } else if (was && !pressed) {
+          playMismatch();
+        }
+      }
 
       // advance noise pulses
       for (const pulse of s.noisePulses) pulse.age += dt;
@@ -967,8 +1218,10 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
           s.playerR = s.room.startR;
           s.playerC = s.room.startC;
           s.facing = 'down';
-          s.exitOpen = s.difficulty === 'hard';
+          s.exitOpen = computeInitialExitOpen(s.room, s.difficulty);
           s.inventory.clear();
+          s.fossilsInInventory = 0;
+          s.carriedEggIdx = null;
         }
       }
 
@@ -976,8 +1229,9 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
       const gridW = COLS * TILE;
       const offsetX = (W - gridW) / 2;
 
-      // dark cave background
-      ctx.fillStyle = '#1a0e08';
+      // grass-field background (sits behind everything; shows through where
+      // tiles happen not to load yet, and matches the overall green feel)
+      ctx.fillStyle = '#6FAF46';
       ctx.fillRect(0, 0, W, H);
 
       ctx.save();
@@ -988,23 +1242,69 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
         for (let c = 0; c < COLS; c++) {
           const x = c * TILE;
           const y = r * TILE;
-          if (s.room.grid[r][c] === 'wall') {
+          const cell = s.room.grid[r][c];
+          if (cell === 'wall') {
             const wallImg = getWallTileImage(r, c);
             if (wallImg.complete && wallImg.naturalWidth > 0) {
               ctx.drawImage(wallImg, x, y, TILE, TILE);
             }
+          } else if (cell === 'pit') {
+            // paint floor first for surrounding edges, then a dark void on top
+            const base = getBaseGrassTileImage();
+            if (base.complete && base.naturalWidth > 0) {
+              ctx.drawImage(base, x, y, TILE, TILE);
+            }
+            ctx.save();
+            ctx.fillStyle = '#120a05';
+            ctx.beginPath();
+            ctx.roundRect(x + 5, y + 5, TILE - 10, TILE - 10, 6);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // subtle inner gradient so the pit reads as depth
+            const grad = ctx.createRadialGradient(
+              x + TILE / 2, y + TILE / 2, 2,
+              x + TILE / 2, y + TILE / 2, TILE / 2,
+            );
+            grad.addColorStop(0, 'rgba(60,30,20,0.7)');
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(x + TILE / 2, y + TILE / 2, TILE / 2 - 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
           } else {
-            const grassImg = getGrassTileImage(r, c);
+            const grassImg = getBaseGrassTileImage();
             if (grassImg.complete && grassImg.naturalWidth > 0) {
               ctx.drawImage(grassImg, x, y, TILE, TILE);
+            }
+            if (cell === 'grass') {
+              // tuft overlay — distinguishes hide-grass from plain floor
+              ctx.save();
+              ctx.fillStyle = 'rgba(40,120,40,0.55)';
+              const tufts = 5;
+              for (let t = 0; t < tufts; t++) {
+                const tx = x + 6 + ((t * 7) % (TILE - 12));
+                const ty = y + 8 + ((t * 11) % (TILE - 16));
+                ctx.beginPath();
+                ctx.moveTo(tx, ty + 7);
+                ctx.lineTo(tx - 2, ty);
+                ctx.lineTo(tx + 3, ty + 2);
+                ctx.lineTo(tx + 1, ty - 3);
+                ctx.lineTo(tx + 5, ty + 1);
+                ctx.lineTo(tx + 4, ty + 7);
+                ctx.fill();
+              }
+              // subtle sway shimmer so it feels "alive"
+              const shim = 0.15 + Math.sin(mouse.time * 2 + r * 0.9 + c * 0.7) * 0.08;
+              ctx.fillStyle = `rgba(120,220,120,${shim})`;
+              ctx.fillRect(x, y, TILE, TILE);
+              ctx.restore();
             }
           }
         }
       }
-
-      // darken the floor for cave feel
-      ctx.fillStyle = 'rgba(0,0,0,0.3)';
-      ctx.fillRect(0, 0, COLS * TILE, ROWS * TILE);
 
       // lava cracks for atmosphere
       for (let i = 0; i < 8; i++) {
@@ -1051,35 +1351,29 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
         }
       }
 
-      // draw pressure plate
+      // draw pressure plate (stone slab sprite — two states)
       if (s.room.plate) {
         const p = s.room.plate;
         const px = p.c * TILE;
         const py = p.r * TILE;
-        const pulse = p.pressed ? 0 : 0.2 + Math.sin(mouse.time * 3) * 0.1;
-
-        ctx.save();
-        if (p.pressed) {
-          ctx.fillStyle = '#4CAF50';
-        } else {
-          ctx.shadowColor = PLATE_COLOR;
-          ctx.shadowBlur = 8 + pulse * 20;
-          ctx.fillStyle = PLATE_COLOR;
+        const img = getPressurePlateImage(p.pressed);
+        if (img.complete && img.naturalWidth > 0) {
+          const size = 36;
+          const offset = (TILE - size) / 2;
+          ctx.save();
+          if (!p.pressed) {
+            // soft pulse glow to invite the player to step on it
+            const pulse = 0.35 + Math.sin(mouse.time * 3) * 0.18;
+            ctx.shadowColor = `rgba(120,220,120,${pulse})`;
+            ctx.shadowBlur = 14;
+          } else {
+            // a steady golden glow once activated
+            ctx.shadowColor = 'rgba(255,213,79,0.55)';
+            ctx.shadowBlur = 10;
+          }
+          ctx.drawImage(img, px + offset, py + offset, size, size);
+          ctx.restore();
         }
-        ctx.beginPath();
-        ctx.ellipse(px + TILE / 2, py + TILE / 2 + 4, TILE * 0.38, TILE * 0.15, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.ellipse(px + TILE / 2, py + TILE / 2 + 4, TILE * 0.38, TILE * 0.15, 0, 0, Math.PI * 2);
-        ctx.stroke();
-        // inner indicator
-        ctx.fillStyle = p.pressed ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.5)';
-        ctx.beginPath();
-        ctx.arc(px + TILE / 2, py + TILE / 2 + 2, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
       }
 
       // draw plate gate (closed: solid; open: faded outline)
@@ -1160,37 +1454,156 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
         ctx.beginPath(); ctx.arc(dx + TILE - 10, dy + TILE - 10, 2, 0, Math.PI * 2); ctx.fill();
       }
 
-      // draw keys (hard mode)
+      // draw keys (colored ornate sprite per color)
       for (const k of s.room.keys) {
         if (k.collected) continue;
         const kx = k.c * TILE + TILE / 2;
         const ky = k.r * TILE + TILE / 2;
         const bob = Math.sin(mouse.time * 3 + k.r * 1.3 + k.c) * 3;
         const color = KEY_COLORS[k.color];
+        const img = getDungeonKeyImage(k.color);
 
         ctx.save();
-        const glowAlpha = 0.25 + Math.sin(mouse.time * 4 + k.r) * 0.1;
+        // colored halo glow to make the key visible on grass
+        const glowAlpha = 0.28 + Math.sin(mouse.time * 4 + k.r) * 0.1;
         ctx.shadowColor = color;
         ctx.shadowBlur = 14;
         ctx.fillStyle = `rgba(255,255,255,${glowAlpha})`;
         ctx.beginPath();
-        ctx.arc(kx, ky + bob, 13, 0, Math.PI * 2);
-        ctx.fill();
-
-        // key body (colored circle + stem + teeth)
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(kx, ky + bob - 4, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillRect(kx - 1.5, ky + bob - 2, 3, 10);
-        ctx.fillRect(kx + 1, ky + bob + 4, 5, 2);
-        ctx.fillRect(kx + 1, ky + bob + 7, 4, 2);
-        // highlight dot
-        ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.beginPath();
-        ctx.arc(kx - 2, ky + bob - 6, 1.5, 0, Math.PI * 2);
+        ctx.arc(kx, ky + bob, 14, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+
+        if (img.complete && img.naturalWidth > 0) {
+          const aspect = img.naturalWidth / img.naturalHeight;
+          const h = 30;
+          const w = h * aspect;
+          ctx.drawImage(img, kx - w / 2, ky + bob - h / 2, w, h);
+        }
+      }
+
+      // draw fossil fragments (uncollected) — use varied bone sprites so each
+      // fossil looks a little different. Seed is the (r, c) pair so a given
+      // fossil keeps the same bone across frames.
+      for (const fossil of s.room.fossils) {
+        if (fossil.collected) continue;
+        const fx = fossil.c * TILE + TILE / 2;
+        const fy = fossil.r * TILE + TILE / 2;
+        const bob = Math.sin(mouse.time * 2.5 + fossil.r * 1.7 + fossil.c * 0.3) * 2;
+        const img = getFossilBoneImage(fossil.r * 31 + fossil.c);
+        if (img.complete && img.naturalWidth > 0) {
+          const aspect = img.naturalWidth / img.naturalHeight;
+          const h = 30;
+          const w = h * aspect;
+          ctx.save();
+          ctx.shadowColor = 'rgba(255,248,200,0.55)';
+          ctx.shadowBlur = 10;
+          ctx.drawImage(img, fx - w / 2, fy + bob - h / 2, w, h);
+          ctx.restore();
+        }
+      }
+
+      // draw the altar (if any)
+      if (s.room.altar) {
+        const ax = s.room.altar.c * TILE;
+        const ay = s.room.altar.r * TILE;
+        const needed = Math.max(0, s.room.altar.requires - s.fossilsInInventory);
+        const ready = !s.room.altar.used && needed === 0;
+
+        // altar sprite (includes its own pedestal + bone-pile + dino-skull detail)
+        const altarImg = getAltarImage();
+        if (altarImg.complete && altarImg.naturalWidth > 0) {
+          const aspect = altarImg.naturalWidth / altarImg.naturalHeight;
+          // slightly larger than the tile so the sprite's base rocks/plants spill
+          // over the tile edge — reads better as a real object in the world.
+          const altarH = TILE + 12;
+          const altarW = altarH * aspect;
+          const drawX = ax + TILE / 2 - altarW / 2;
+          const drawY = ay + TILE - altarH + 6;
+
+          ctx.save();
+          if (ready) {
+            // pulsing golden halo behind the altar when it's ready to activate
+            const glow = 0.4 + Math.sin(mouse.time * 4) * 0.3;
+            ctx.shadowColor = '#FFD54F';
+            ctx.shadowBlur = 18;
+            ctx.fillStyle = `rgba(255,213,79,${0.18 + glow * 0.18})`;
+            ctx.beginPath();
+            ctx.arc(ax + TILE / 2, ay + TILE / 2, TILE / 2 + 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // once used, the altar's mostly-decorative — fade slightly
+          if (s.room.altar.used) {
+            ctx.globalAlpha = 0.78;
+          }
+          ctx.drawImage(altarImg, drawX, drawY, altarW, altarH);
+          ctx.restore();
+        }
+
+        if (!s.room.altar.used) {
+          // counter badge above the altar
+          ctx.save();
+          ctx.fillStyle = ready ? '#FFD54F' : 'rgba(255,255,255,0.85)';
+          ctx.font = 'bold 12px Fredoka, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+          ctx.lineWidth = 3;
+          ctx.lineJoin = 'round';
+          const label = ready ? 'Ready!' : `${s.fossilsInInventory}/${s.room.altar.requires} 🦴`;
+          ctx.strokeText(label, ax + TILE / 2, ay - 2);
+          ctx.fillText(label, ax + TILE / 2, ay - 2);
+          ctx.restore();
+
+          // dashed line to the target so authors & players can read intent
+          ctx.save();
+          ctx.strokeStyle = ready ? 'rgba(255,213,79,0.6)' : 'rgba(255,255,255,0.18)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 6]);
+          ctx.beginPath();
+          ctx.moveTo(ax + TILE / 2, ay + TILE / 2);
+          ctx.lineTo(s.room.altar.targetC * TILE + TILE / 2, s.room.altar.targetR * TILE + TILE / 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+      }
+
+      // draw uncollected eggs — whole egg sprite bobbing on the ground
+      for (let i = 0; i < s.room.eggs.length; i++) {
+        const egg = s.room.eggs[i];
+        if (egg.collected || egg.hatched) continue;
+        const ex = egg.c * TILE + TILE / 2;
+        const ey = egg.r * TILE + TILE / 2;
+        const bob = Math.sin(mouse.time * 2 + egg.r * 0.8) * 2;
+        const img = getDungeonEggImage(false);
+        if (img.complete && img.naturalWidth > 0) {
+          const aspect = img.naturalWidth / img.naturalHeight;
+          const h = 30;
+          const w = h * aspect;
+          ctx.save();
+          // faint warm halo beneath so the pastel egg reads on grass
+          ctx.fillStyle = 'rgba(255,235,180,0.25)';
+          ctx.beginPath();
+          ctx.ellipse(ex, ey + 10, 16, 5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.drawImage(img, ex - w / 2, ey + bob - h / 2, w, h);
+          ctx.restore();
+        }
+      }
+
+      // draw hatched babies on plates — opened-egg sprite sits still on the
+      // plate (no bob) since the baby dino is literally weighing the plate down.
+      for (const egg of s.room.eggs) {
+        if (!egg.hatched || egg.hatchR === undefined || egg.hatchC === undefined) continue;
+        const bx = egg.hatchC * TILE + TILE / 2;
+        const by = egg.hatchR * TILE + TILE / 2;
+        const img = getDungeonEggImage(true);
+        if (img.complete && img.naturalWidth > 0) {
+          const aspect = img.naturalWidth / img.naturalHeight;
+          const h = 32;
+          const w = h * aspect;
+          ctx.drawImage(img, bx - w / 2, by - h / 2, w, h);
+        }
       }
 
       // draw treasures
@@ -1217,10 +1630,10 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
         ctx.fillText(TREASURE_EMOJIS[t.type], tx, ty + bob + 7);
       }
 
-      // draw guard vision cones
+      // draw guard vision cones (brighter, pulsing, with an outline so kids can't miss them)
       for (const guard of s.room.guards) {
         if (guard.alertTimer > 0) continue;
-        const range = visionRange(s.difficulty);
+        const range = visionRange(s.difficulty, guard.kind);
         let dr = 0;
         let dc = 0;
         if (guard.facing === 'up') dr = -1;
@@ -1228,7 +1641,22 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
         else if (guard.facing === 'left') dc = -1;
         else dc = 1;
 
-        const coneAlpha = 0.08 + Math.sin(mouse.time * 2) * 0.03;
+        const pulse = 0.25 + Math.sin(mouse.time * 2.5) * 0.08;
+        const peripheralPulse = pulse * 0.55;
+
+        const paintConeTile = (tr: number, tc: number, alpha: number) => {
+          const x = tc * TILE + 2;
+          const y = tr * TILE + 2;
+          const w = TILE - 4;
+          const h = TILE - 4;
+          // filled danger tint
+          ctx.fillStyle = `rgba(255,70,70,${alpha})`;
+          ctx.fillRect(x, y, w, h);
+          // bright outline
+          ctx.strokeStyle = `rgba(255,120,120,${Math.min(1, alpha + 0.35)})`;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x, y, w, h);
+        };
 
         for (let i = 1; i <= range; i++) {
           const cr = guard.r + dr * i;
@@ -1236,30 +1664,39 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
           if (cr < 0 || cr >= ROWS || cc < 0 || cc >= COLS) break;
           if (s.room.grid[cr][cc] === 'wall') break;
 
-          ctx.fillStyle = `rgba(255,100,100,${coneAlpha})`;
-          ctx.fillRect(cc * TILE + 2, cr * TILE + 2, TILE - 4, TILE - 4);
+          paintConeTile(cr, cc, pulse);
 
-          // peripheral
           if (dr !== 0) {
             if (cc - 1 >= 0 && s.room.grid[cr][cc - 1] === 'empty') {
-              ctx.fillStyle = `rgba(255,100,100,${coneAlpha * 0.5})`;
-              ctx.fillRect((cc - 1) * TILE + 2, cr * TILE + 2, TILE - 4, TILE - 4);
+              paintConeTile(cr, cc - 1, peripheralPulse);
             }
             if (cc + 1 < COLS && s.room.grid[cr][cc + 1] === 'empty') {
-              ctx.fillStyle = `rgba(255,100,100,${coneAlpha * 0.5})`;
-              ctx.fillRect((cc + 1) * TILE + 2, cr * TILE + 2, TILE - 4, TILE - 4);
+              paintConeTile(cr, cc + 1, peripheralPulse);
             }
           } else {
             if (cr - 1 >= 0 && s.room.grid[cr - 1][cc] === 'empty') {
-              ctx.fillStyle = `rgba(255,100,100,${coneAlpha * 0.5})`;
-              ctx.fillRect(cc * TILE + 2, (cr - 1) * TILE + 2, TILE - 4, TILE - 4);
+              paintConeTile(cr - 1, cc, peripheralPulse);
             }
             if (cr + 1 < ROWS && s.room.grid[cr + 1][cc] === 'empty') {
-              ctx.fillStyle = `rgba(255,100,100,${coneAlpha * 0.5})`;
-              ctx.fillRect(cc * TILE + 2, (cr + 1) * TILE + 2, TILE - 4, TILE - 4);
+              paintConeTile(cr + 1, cc, peripheralPulse);
             }
           }
         }
+
+        // a small "eye" marker above the guard points in the direction they're looking
+        const gx = guard.c * TILE + TILE / 2;
+        const gy = guard.r * TILE + TILE / 2;
+        ctx.save();
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = '#FF5252';
+        ctx.beginPath();
+        ctx.arc(gx + dc * 14, gy + dr * 14 - 18, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(gx + dc * 14, gy + dr * 14 - 18, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       }
 
       // draw guards
@@ -1285,11 +1722,60 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
         }
       }
 
+      // current-tile highlight (draw behind the player so they sit on top)
+      {
+        const hx = s.playerC * TILE;
+        const hy = s.playerR * TILE;
+        const pulse = 0.25 + Math.sin(mouse.time * 3) * 0.08;
+        ctx.save();
+        ctx.fillStyle = `rgba(255,255,200,${pulse})`;
+        ctx.fillRect(hx + 2, hy + 2, TILE - 4, TILE - 4);
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(hx + 2.5, hy + 2.5, TILE - 5, TILE - 5);
+        ctx.restore();
+      }
+
       // draw player
       if (!s.caught || Math.sin(mouse.time * 15) > 0) {
         const px = s.playerC * TILE + TILE / 2;
         const py = s.playerR * TILE + TILE / 2;
-        drawWalkDino(ctx, px, py - 3, 30, s.facing, mouse.time);
+        const inGrass = s.room.grid[s.playerR]?.[s.playerC] === 'grass';
+        const dinoSize = 40;
+        if (inGrass) {
+          ctx.save();
+          ctx.globalAlpha = 0.55;
+          drawWalkDino(ctx, px, py - 3, dinoSize, s.facing, mouse.time);
+          ctx.restore();
+          // tiny "hidden" eye above the player
+          ctx.save();
+          ctx.fillStyle = 'rgba(120,220,120,0.9)';
+          ctx.font = '14px Fredoka, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('🌿', px, py - 22);
+          ctx.restore();
+        } else {
+          drawWalkDino(ctx, px, py - 3, dinoSize, s.facing, mouse.time);
+        }
+
+        // egg bobbing above the player's head when carrying — full egg sprite
+        if (s.carriedEggIdx !== null) {
+          const eggBob = Math.sin(mouse.time * 3) * 3;
+          const img = getDungeonEggImage(false);
+          if (img.complete && img.naturalWidth > 0) {
+            const aspect = img.naturalWidth / img.naturalHeight;
+            const h = 28;
+            const w = h * aspect;
+            ctx.save();
+            // soft shadow below the floating egg
+            ctx.fillStyle = 'rgba(0,0,0,0.22)';
+            ctx.beginPath();
+            ctx.ellipse(px, py - 22, 8, 2.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.drawImage(img, px - w / 2, py - 34 + eggBob - h / 2, w, h);
+            ctx.restore();
+          }
+        }
       }
 
       // arrow hints for valid moves
@@ -1431,7 +1917,15 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.font = '12px Fredoka, sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(`Room ${s.level + 1}`, 16, H - 10);
+      const generatorMode = getDungeonGenerator();
+      if (generatorMode === 'template') {
+        const tpl = templateForLevel(s.level);
+        ctx.fillStyle = '#FFD54F';
+        ctx.font = 'bold 12px Fredoka, sans-serif';
+        ctx.fillText(`Room ${s.level + 1} · ${tpl.name}`, 16, H - 10);
+      } else {
+        ctx.fillText(`Room ${s.level + 1}`, 16, H - 10);
+      }
 
       // running-state indicator
       if (s.difficulty === 'hard') {
@@ -1441,7 +1935,59 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
         ctx.fillText(s.running ? '🏃 Running (loud!)' : 'Shift = run', W - 16, H - 10);
       }
 
+      // Egg pickup/drop hint: shown when the player is standing on an egg, or
+      // currently carrying one. Helps make the E key discoverable.
+      {
+        const standingOnEgg = s.room.eggs.some(
+          (e) => !e.collected && !e.hatched && e.r === s.playerR && e.c === s.playerC,
+        );
+        const carrying = s.carriedEggIdx !== null;
+        if (standingOnEgg || carrying) {
+          const playerCenterX = s.playerC * TILE + TILE / 2;
+          // below the dino, below the current tile, so the carried-egg sprite
+          // above the head stays unobstructed
+          const bubbleY = (s.playerR + 1) * TILE + 4;
+          const label = carrying ? 'Press E to drop egg' : 'Press E to pick up';
+          ctx.save();
+          ctx.fillStyle = 'rgba(0,0,0,0.65)';
+          ctx.strokeStyle = 'rgba(255,213,79,0.6)';
+          ctx.lineWidth = 2;
+          ctx.font = 'bold 12px Fredoka, sans-serif';
+          ctx.textAlign = 'center';
+          const w = ctx.measureText(label).width + 18;
+          ctx.beginPath();
+          ctx.roundRect(playerCenterX - w / 2, bubbleY, w, 20, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#FFD54F';
+          ctx.fillText(label, playerCenterX, bubbleY + 15);
+          ctx.restore();
+        }
+      }
+
       drawScore(ctx, '🏰', s.completed);
+
+      // fossil counter HUD (only shown when the room has fossils in play)
+      if (s.room.fossils.length > 0 || (s.room.altar && !s.room.altar.used)) {
+        const totalFossils = s.room.fossils.length;
+        const pickedUp = s.room.fossils.filter((f) => f.collected).length;
+        const req = s.room.altar?.requires ?? totalFossils;
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.beginPath();
+        ctx.roundRect(W - 170, 56, 156, 28, 8);
+        ctx.fill();
+        ctx.fillStyle = '#FFD54F';
+        ctx.font = 'bold 13px Fredoka, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(
+          `🦴 ${s.fossilsInInventory}/${req} (found ${pickedUp}/${totalFossils})`,
+          W - 162,
+          74,
+        );
+        ctx.restore();
+      }
+
       drawEasyModeButton(ctx, 100, 14, mouse.mouseX, mouse.mouseY, s.easyMode);
       drawStickerPopup(ctx, s.stickerPopup, s.stickerPopupTimer, W, H);
       drawBackButton(ctx, W - 110, 10, mouse.mouseX, mouse.mouseY);
@@ -1474,7 +2020,9 @@ export function DinoDungeon({ onBack }: { onBack: () => void }) {
         s.playerC = s.room.startC;
         s.facing = 'down';
         s.inventory.clear();
-        s.exitOpen = s.difficulty === 'hard';
+        s.fossilsInInventory = 0;
+        s.carriedEggIdx = null;
+        s.exitOpen = computeInitialExitOpen(s.room, s.difficulty);
         return;
       }
       if (mx > W - 110 && mx < W && my > 10 && my < 54) {

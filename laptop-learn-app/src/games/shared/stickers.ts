@@ -1,5 +1,16 @@
 import type { Sticker } from './types';
 import { profileKey } from './profile';
+import { tryAdvanceQuest } from './quests';
+import type { QuestStepResult } from './quests';
+
+// Light-weight bus so game code can trigger Quill bubbles without importing React.
+const QUILL_EVENT = 'quill:bubble';
+function dispatchQuillBubble(detail: { emote: string; message: string; durationMs?: number }) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent(QUILL_EVENT, { detail }));
+  } catch {}
+}
 
 export interface StickerDef {
   id: string;
@@ -94,14 +105,70 @@ function loadProgress(): Record<string, number> {
   }
 }
 
+// Drains any pending quest step advancement event. Valley reads this when it
+// re-mounts after a game ends to show the quest progress/complete overlay.
+const PENDING_QUEST_EVENT_KEY = 'pendingQuestEvent';
+
 export function trackProgress(game: string): number {
   try {
     const progress = loadProgress();
     const current = (progress[game] ?? 0) + 1;
     progress[game] = current;
     localStorage.setItem(profileKey('progress'), JSON.stringify(progress));
+
+    // if an active quest's current step matches this game, advance it and
+    // stash an event for the Valley to read next time it mounts.
+    const result: QuestStepResult = tryAdvanceQuest(game);
+    if (result.advanced) {
+      try {
+        localStorage.setItem(
+          profileKey(PENDING_QUEST_EVENT_KEY),
+          JSON.stringify({
+            completed: result.completed,
+            questId: result.quest?.id,
+            nextGameId: result.nextStep?.gameId,
+            at: Date.now(),
+          }),
+        );
+      } catch {}
+
+      // Pop Quill in the bottom-right so the kid gets immediate feedback
+      // mid-game, in addition to the modal that shows on Valley return.
+      if (result.completed && result.quest) {
+        dispatchQuillBubble({
+          emote: result.quest.outroEmote ?? 'grateful',
+          message: `Quest complete! ${result.quest.reward.emoji} ${result.quest.reward.name} earned!`,
+          durationMs: 5500,
+        });
+      } else if (result.nextStep) {
+        dispatchQuillBubble({
+          emote: result.nextStep.emote ?? 'excited',
+          message: `Nice! Next up: ${result.nextStep.callToAction}`,
+          durationMs: 5000,
+        });
+      }
+    }
+
     return current;
   } catch {
     return 0;
   }
+}
+
+export interface PendingQuestEvent {
+  completed: boolean;
+  questId?: string;
+  nextGameId?: string;
+  at: number;
+}
+
+export function consumePendingQuestEvent(): PendingQuestEvent | null {
+  try {
+    const raw = localStorage.getItem(profileKey(PENDING_QUEST_EVENT_KEY));
+    if (!raw) return null;
+    localStorage.removeItem(profileKey(PENDING_QUEST_EVENT_KEY));
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.at === 'number') return parsed;
+  } catch {}
+  return null;
 }

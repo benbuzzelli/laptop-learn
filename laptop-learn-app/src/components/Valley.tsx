@@ -1,55 +1,107 @@
 import { useRef, useCallback } from 'react';
-import { drawDino, drawCustomCursor } from '../games/shared/draw';
+import { drawCustomCursor } from '../games/shared/draw';
 import type { WalkDirection } from '../games/shared/draw';
-import { getGameIconImage } from '../games/shared/dino-svgs';
 import { useGameCanvas } from '../games/shared/useGameCanvas';
 import { playStep, playPop } from '../games/shared/audio';
-import { getAvatar } from '../games/shared/avatar';
+import {
+  getAvatar,
+  drawAvatarSprite,
+  getEarnedStickerCount,
+  getGrowthStage,
+} from '../games/shared/avatar';
 import { getActiveProfile, profileKey } from '../games/shared/profile';
 import { getCollectionCount, getAllSlots } from '../games/shared/collection';
+import {
+  getActiveQuest,
+  getQuestById,
+  completedToday,
+} from '../games/shared/quests';
+import { getQuillSpriteImage } from '../games/shared/quill';
 import type { GameId } from '../games/shared/types';
+
+// Map background
+import dinoMapUrl from '../games/shared/sprites/backgrounds/dino-map.png';
+
+// Numbered game icons — filename format is <name>-<x>-<y>.png where x,y is the
+// top-left position of the icon in map pixel space.
+import volcanoIcon from '../games/shared/sprites/backgrounds/games/volcano-game-178-17.png';
+import dungeonIcon from '../games/shared/sprites/backgrounds/games/dungeon-game-1380-166.png';
+import spellIcon from '../games/shared/sprites/backgrounds/games/spell-game-882-756.png';
+import eggIcon from '../games/shared/sprites/backgrounds/games/egg-hatch-game-370-1256.png';
+import museumIcon from '../games/shared/sprites/backgrounds/games/museum-1724-997.png';
+import boneCaveIcon from '../games/shared/sprites/backgrounds/games/bone-cave-2615-466.png';
+import jungleIcon from '../games/shared/sprites/backgrounds/games/jungle-find-2970-1107.png';
 
 const W = 800;
 const H = 600;
-const TILE = 50;
-const COLS = Math.ceil(W / TILE);
-const ROWS = Math.ceil(H / TILE);
+const MAP_W = 3618;
+const MAP_H = 1727;
+
+// World zoom: how much the map + its painted icons shrink in the viewport.
+// Player and Quill keep their canvas-native size so the characters don't
+// become hard to see. 0.42 shows roughly 1900×1430 of map at a time.
+const ZOOM = 0.34;
+const VIEW_MAP_W = W / ZOOM;
+const VIEW_MAP_H = H / ZOOM;
 
 type LocationId = GameId;
 
 interface ValleyLocation {
   id: LocationId;
   name: string;
-  x: number;
-  y: number;
-  icon: string;
-  color: string;
   description: string;
+  url: string;
+  x: number; // map-space top-left x
+  y: number; // map-space top-left y
+  w: number;
+  h: number;
 }
 
-function tileCenter(col: number, row: number): { x: number; y: number } {
-  return { x: col * TILE + TILE / 2, y: row * TILE + TILE / 2 };
-}
-
-function snapToTile(x: number, y: number): { x: number; y: number } {
-  const col = Math.max(0, Math.min(COLS - 1, Math.floor(x / TILE)));
-  const row = Math.max(0, Math.min(ROWS - 1, Math.floor(y / TILE)));
-  return tileCenter(col, row);
-}
-
-// locations defined by tile (col, row) — always on grid
 const LOCATIONS: ValleyLocation[] = [
-  { id: 'volcano-escape', name: 'Volcano',    ...tileCenter(2, 3),  icon: '🌋', color: '#FF9800', description: 'Volcano Run' },
-  { id: 'egg-hunt',       name: 'Nest',       ...tileCenter(8, 2),  icon: '🥚', color: '#FF6B6B', description: 'Egg Hunt' },
-  { id: 'spell-dino',     name: 'Chalkboard', ...tileCenter(13, 3), icon: '🔤', color: '#FFA726', description: 'Spell Dino' },
-  { id: 'dino-match',     name: 'Fossil Cave',...tileCenter(2, 7),  icon: '🦴', color: '#7E57C2', description: 'Dino Match' },
-  { id: 'collection',     name: 'Museum',     ...tileCenter(8, 6),  icon: '🏛️', color: '#FFD700', description: 'Dino Museum' },
-  { id: 'jungle-explorer',name: 'Jungle',     ...tileCenter(13, 7), icon: '🌴', color: '#2E7D32', description: 'Jungle Find' },
-  { id: 'dino-dungeon',   name: 'Deep Cave',  ...tileCenter(8, 9),  icon: '🏰', color: '#795548', description: 'Dino Dungeon' },
+  { id: 'volcano-escape',  name: 'Volcano',     description: 'Volcano Run',  url: volcanoIcon,  x: 178,  y: 17,   w: 484, h: 475 },
+  { id: 'dino-dungeon',    name: 'Deep Cave',   description: 'Dino Dungeon', url: dungeonIcon,  x: 1380, y: 166,  w: 402, h: 300 },
+  { id: 'spell-dino',      name: 'Chalkboard',  description: 'Spell Dino',   url: spellIcon,    x: 882,  y: 756,  w: 328, h: 272 },
+  { id: 'egg-hunt',        name: 'Nest',        description: 'Egg Hunt',     url: eggIcon,      x: 370,  y: 1256, w: 318, h: 266 },
+  { id: 'collection',      name: 'Museum',      description: 'Dino Museum',  url: museumIcon,   x: 1724, y: 997,  w: 310, h: 350 },
+  { id: 'dino-match',      name: 'Fossil Cave', description: 'Dino Match',   url: boneCaveIcon, x: 2615, y: 466,  w: 318, h: 320 },
+  { id: 'jungle-explorer', name: 'Jungle',      description: 'Jungle Find',  url: jungleIcon,   x: 2970, y: 1107, w: 383, h: 328 },
 ];
 
-const SPAWN = tileCenter(4, 9);
-const POS_KEY = 'valleyPos';
+// map-space spawn point — open area near the map center-bottom
+const SPAWN = { x: 1800, y: 1480 };
+const POS_KEY = 'valleyMapPos';
+
+// Quill NPC in map-space
+const QUEST_GIVER = {
+  x: 2250,
+  y: 1400,
+  name: 'Quill',
+};
+
+const WALK_SPEED = 560; // map pixels per second (~235 screen px/s at ZOOM=0.42)
+const ARRIVE_DIST = 14;
+const ENTER_DIST = 260; // close enough (in map pixels) to trigger a game on tap
+const LOCATION_HIT_PAD = 24; // extra pixels around the location bbox for tap generosity
+
+const imageCache = new Map<string, HTMLImageElement>();
+function loadUrl(url: string): HTMLImageElement {
+  const cached = imageCache.get(url);
+  if (cached) return cached;
+  const img = new Image();
+  img.src = url;
+  imageCache.set(url, img);
+  return img;
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function distance(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
 
 function loadPlayerPos(): { x: number; y: number } {
   try {
@@ -57,7 +109,10 @@ function loadPlayerPos(): { x: number; y: number } {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
-        return { x: parsed.x, y: parsed.y };
+        return {
+          x: clamp(parsed.x, 20, MAP_W - 20),
+          y: clamp(parsed.y, 20, MAP_H - 20),
+        };
       }
     }
   } catch {}
@@ -70,19 +125,24 @@ function savePlayerPos(pos: { x: number; y: number }) {
   } catch {}
 }
 
-const WALK_SPEED = 260; // px/sec
-const ARRIVE_DIST = 22;
-const ENTER_DIST = 55;
-const LOCATION_HIT_R = 80;
-
-function distance(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return Math.sqrt(dx * dx + dy * dy);
+// Camera: top-left of viewport in map-space. Centers on the player, clamped to
+// the map. When the map is larger than the viewport (it is, in both axes here),
+// this gives smooth scrolling that kicks in as the player nears any edge.
+function computeCamera(player: { x: number; y: number }): { camX: number; camY: number } {
+  const camX = clamp(player.x - VIEW_MAP_W / 2, 0, Math.max(0, MAP_W - VIEW_MAP_W));
+  const camY = clamp(player.y - VIEW_MAP_H / 2, 0, Math.max(0, MAP_H - VIEW_MAP_H));
+  return { camX, camY };
 }
 
-
-export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void }) {
+export function Valley({
+  onSelectGame,
+  onOpenMyDino,
+  onOpenQuestGiver,
+}: {
+  onSelectGame: (id: GameId) => void;
+  onOpenMyDino?: () => void;
+  onOpenQuestGiver?: () => void;
+}) {
   const avatar = getAvatar();
   const stateRef = useRef({
     player: loadPlayerPos(),
@@ -91,6 +151,10 @@ export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void })
     moving: false,
     hoverLocation: null as LocationId | null,
     time: 0,
+    myDinoBtn: null as { x: number; y: number; w: number; h: number } | null,
+    hoverQuestGiver: false,
+    camX: 0,
+    camY: 0,
   });
 
   const { canvasRef } = useGameCanvas({
@@ -101,7 +165,7 @@ export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void })
       const s = stateRef.current;
       s.time = mouse.time;
 
-      // update walk position
+      // walk toward target (map-space)
       if (s.target) {
         const dx = s.target.x - s.player.x;
         const dy = s.target.y - s.player.y;
@@ -110,13 +174,9 @@ export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void })
           const step = Math.min(WALK_SPEED * dt, dist);
           s.player.x += (dx / dist) * step;
           s.player.y += (dy / dist) * step;
-          // only update horizontal facing — vertical moves keep prior side
-          if (Math.abs(dx) > 0.5) {
-            s.facing = dx > 0 ? 'right' : 'left';
-          }
+          if (Math.abs(dx) > 0.5) s.facing = dx > 0 ? 'right' : 'left';
           s.moving = true;
         } else {
-          // snap exactly onto the tile center
           s.player.x = s.target.x;
           s.player.y = s.target.y;
           s.moving = false;
@@ -124,7 +184,6 @@ export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void })
           s.target = null;
           savePlayerPos(s.player);
           if (targetLocId) {
-            // arrived at a location — enter its game
             playPop();
             onSelectGame(targetLocId);
           }
@@ -133,78 +192,37 @@ export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void })
         s.moving = false;
       }
 
-      // update hover location
+      // update camera to follow the player
+      const { camX, camY } = computeCamera(s.player);
+      s.camX = camX;
+      s.camY = camY;
+
+      // mouse position in map-space (viewport is zoomed)
+      const mmx = mouse.mouseX / ZOOM + camX;
+      const mmy = mouse.mouseY / ZOOM + camY;
+
       s.hoverLocation = null;
       for (const loc of LOCATIONS) {
-        if (distance({ x: mouse.mouseX, y: mouse.mouseY }, { x: loc.x, y: loc.y }) < 48) {
+        if (
+          mmx >= loc.x - LOCATION_HIT_PAD && mmx <= loc.x + loc.w + LOCATION_HIT_PAD &&
+          mmy >= loc.y - LOCATION_HIT_PAD && mmy <= loc.y + loc.h + LOCATION_HIT_PAD
+        ) {
           s.hoverLocation = loc.id;
           break;
         }
       }
+      s.hoverQuestGiver = distance({ x: mmx, y: mmy }, QUEST_GIVER) < 70;
 
-      // --- BACKGROUND: alternating grass tile grid ---
-      const TILE_LIGHT = '#86C558';
-      const TILE_DARK = '#6FAF46';
-      const TILE_HOVER = 'rgba(255,255,220,0.28)';
-
-      const hoverCol = Math.floor(mouse.mouseX / TILE);
-      const hoverRow = Math.floor(mouse.mouseY / TILE);
-
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-          ctx.fillStyle = (r + c) % 2 === 0 ? TILE_LIGHT : TILE_DARK;
-          ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
-        }
+      // --- background: dino-map image, drawn at ZOOM scale ---
+      const mapImg = loadUrl(dinoMapUrl);
+      if (mapImg.complete && mapImg.naturalWidth > 0) {
+        ctx.drawImage(mapImg, -camX * ZOOM, -camY * ZOOM, MAP_W * ZOOM, MAP_H * ZOOM);
+      } else {
+        ctx.fillStyle = '#86C558';
+        ctx.fillRect(0, 0, W, H);
       }
 
-      // hover highlight
-      if (
-        hoverCol >= 0 && hoverCol < COLS &&
-        hoverRow >= 0 && hoverRow < ROWS
-      ) {
-        ctx.fillStyle = TILE_HOVER;
-        ctx.fillRect(hoverCol * TILE, hoverRow * TILE, TILE, TILE);
-        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(hoverCol * TILE + 1, hoverRow * TILE + 1, TILE - 2, TILE - 2);
-      }
-
-      // distant mountains silhouette (overlay on top row of tiles for depth)
-      ctx.save();
-      ctx.fillStyle = 'rgba(70,110,80,0.55)';
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(0, 95);
-      ctx.lineTo(90, 45);
-      ctx.lineTo(170, 80);
-      ctx.lineTo(260, 35);
-      ctx.lineTo(350, 75);
-      ctx.lineTo(460, 40);
-      ctx.lineTo(560, 72);
-      ctx.lineTo(660, 40);
-      ctx.lineTo(760, 70);
-      ctx.lineTo(W, 55);
-      ctx.lineTo(W, 0);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      // dotted path lines connecting locations to center (subtle)
-      const hub = LOCATIONS.find((l) => l.id === 'collection')!;
-      ctx.save();
-      ctx.setLineDash([4, 10]);
-      ctx.strokeStyle = 'rgba(120,90,60,0.35)';
-      ctx.lineWidth = 3;
-      for (const loc of LOCATIONS) {
-        if (loc.id === 'collection') continue;
-        ctx.beginPath();
-        ctx.moveTo(loc.x, loc.y);
-        ctx.lineTo(hub.x, hub.y);
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      // title banner
+      // --- title banner (screen-space) ---
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.35)';
       ctx.beginPath();
@@ -220,26 +238,61 @@ export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void })
       ctx.fillText('Dino Valley', W / 2, 36);
       ctx.restore();
 
-      // --- LOCATION MARKERS ---
-      // collect drawables and sort by Y so closer (lower) ones render on top
+      // --- y-sorted world entities ---
+      const activeQuest = getActiveQuest();
+      const questDone = completedToday();
+      const hasQuestAvailable = !questDone && !activeQuest;
+
       type Drawable =
         | { kind: 'location'; loc: ValleyLocation; y: number }
-        | { kind: 'player'; y: number };
+        | { kind: 'player'; y: number }
+        | { kind: 'questGiver'; y: number };
 
       const drawables: Drawable[] = [];
-      for (const loc of LOCATIONS) drawables.push({ kind: 'location', loc, y: loc.y + 30 });
-      drawables.push({ kind: 'player', y: s.player.y + 15 });
+      for (const loc of LOCATIONS) drawables.push({ kind: 'location', loc, y: loc.y + loc.h });
+      drawables.push({ kind: 'player', y: s.player.y });
+      drawables.push({ kind: 'questGiver', y: QUEST_GIVER.y + 50 });
       drawables.sort((a, b) => a.y - b.y);
 
       for (const d of drawables) {
         if (d.kind === 'location') {
-          drawLocation(ctx, d.loc, s.hoverLocation === d.loc.id, mouse.time);
-        } else {
+          drawLocation(ctx, d.loc, s.hoverLocation === d.loc.id, mouse.time, camX, camY);
+        } else if (d.kind === 'player') {
           drawAvatar(ctx, s, avatar, mouse.time);
+        } else {
+          drawQuestGiver(ctx, s.hoverQuestGiver, mouse.time, hasQuestAvailable, !!activeQuest, camX, camY);
         }
       }
 
-      // footer — profile + collection count
+      // --- active quest banner (screen-space, bottom) ---
+      if (activeQuest) {
+        const quest = getQuestById(activeQuest.id);
+        if (quest) {
+          const step = quest.steps[activeQuest.stepIndex];
+          const msg = step
+            ? `Quest: ${quest.title} · step ${activeQuest.stepIndex + 1}/${quest.steps.length}: ${step.callToAction}`
+            : `Quest: ${quest.title}`;
+          ctx.save();
+          ctx.font = 'bold 14px Fredoka, sans-serif';
+          const textW = ctx.measureText(msg).width;
+          const bannerW = Math.min(W - 40, textW + 36);
+          const bannerX = (W - bannerW) / 2;
+          const bannerY = H - 76;
+          ctx.fillStyle = 'rgba(62, 39, 35, 0.88)';
+          ctx.strokeStyle = 'rgba(255,213,79,0.8)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.roundRect(bannerX, bannerY, bannerW, 26, 13);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#FFE0B2';
+          ctx.textAlign = 'center';
+          ctx.fillText(msg, W / 2, bannerY + 18);
+          ctx.restore();
+        }
+      }
+
+      // --- footer: collection count (screen-space) ---
       const slots = getAllSlots();
       const collected = getCollectionCount();
       ctx.save();
@@ -253,13 +306,49 @@ export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void })
       ctx.fillText(`🦖 ${collected}/${slots.length} dinos discovered`, 24, H - 22);
       ctx.restore();
 
-      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      // --- My Dino button (top-right) ---
+      if (avatar) {
+        const stickers = getEarnedStickerCount();
+        const stage = getGrowthStage(stickers);
+        const btnW = 88;
+        const btnH = 88;
+        const btnX = W - btnW - 14;
+        const btnY = 56;
+        const btnHover =
+          mouse.mouseX >= btnX && mouse.mouseX <= btnX + btnW &&
+          mouse.mouseY >= btnY && mouse.mouseY <= btnY + btnH;
+        s.myDinoBtn = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+        ctx.save();
+        ctx.fillStyle = btnHover ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.55)';
+        ctx.shadowColor = btnHover ? 'rgba(255,255,255,0.6)' : 'transparent';
+        ctx.shadowBlur = btnHover ? 14 : 0;
+        ctx.beginPath();
+        ctx.roundRect(btnX, btnY, btnW, btnH, 14);
+        ctx.fill();
+        ctx.restore();
+
+        drawAvatarSprite(
+          ctx,
+          btnX + btnW / 2,
+          btnY + btnH / 2 - 4,
+          40,
+          avatar.species,
+          stage.index,
+        );
+
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.font = 'bold 11px Fredoka, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(stage.name, btnX + btnW / 2, btnY + btnH - 6);
+      }
+
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
       ctx.font = 'bold 13px Fredoka, sans-serif';
       ctx.textAlign = 'right';
       ctx.fillText(`Playing as: ${getActiveProfile()}`, W - 16, H - 22);
 
-      // help text
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
       ctx.font = '12px Fredoka, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('Tap a place to visit it!', W / 2, H - 22);
@@ -280,37 +369,56 @@ export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void })
         clientY = e.clientY;
       }
       const rect = e.currentTarget.getBoundingClientRect();
-      const mx = (clientX - rect.left) * (W / rect.width);
-      const my = (clientY - rect.top) * (H / rect.height);
+      const sx = (clientX - rect.left) * (W / rect.width);
+      const sy = (clientY - rect.top) * (H / rect.height);
       const s = stateRef.current;
 
-      // check location hits first — accept radius OR same tile OR the tile directly above
-      const clickCol = Math.floor(mx / TILE);
-      const clickRow = Math.floor(my / TILE);
+      // My Dino button (screen-space)
+      const md = s.myDinoBtn;
+      if (md && sx >= md.x && sx <= md.x + md.w && sy >= md.y && sy <= md.y + md.h) {
+        playPop();
+        onOpenMyDino?.();
+        return;
+      }
+
+      // convert to map-space for everything else (viewport is zoomed)
+      const mx = sx / ZOOM + s.camX;
+      const my = sy / ZOOM + s.camY;
+
+      // Quest Giver tap (map-space)
+      if (distance({ x: mx, y: my }, QUEST_GIVER) < 70) {
+        playPop();
+        onOpenQuestGiver?.();
+        return;
+      }
+
+      // location hit (map-space bbox + generous pad)
       for (const loc of LOCATIONS) {
-        const locCol = Math.round((loc.x - TILE / 2) / TILE);
-        const locRow = Math.round((loc.y - TILE / 2) / TILE);
-        const sameTile = clickCol === locCol && clickRow === locRow;
-        const tileAbove = clickCol === locCol && clickRow === locRow - 1;
-        const inRadius = distance({ x: mx, y: my }, { x: loc.x, y: loc.y }) < LOCATION_HIT_R;
-        if (sameTile || tileAbove || inRadius) {
-          if (distance(s.player, { x: loc.x, y: loc.y }) < ENTER_DIST) {
+        if (
+          mx >= loc.x - LOCATION_HIT_PAD && mx <= loc.x + loc.w + LOCATION_HIT_PAD &&
+          my >= loc.y - LOCATION_HIT_PAD && my <= loc.y + loc.h + LOCATION_HIT_PAD
+        ) {
+          const center = { x: loc.x + loc.w / 2, y: loc.y + loc.h / 2 };
+          if (distance(s.player, center) < ENTER_DIST) {
             playPop();
             onSelectGame(loc.id);
           } else {
             playStep();
-            s.target = { x: loc.x, y: loc.y, locationId: loc.id };
+            // walk to just below the icon's bottom edge so the sprite doesn't overlap the art
+            s.target = { x: center.x, y: loc.y + loc.h + 30, locationId: loc.id };
           }
           return;
         }
       }
 
-      // empty tap — snap to the tile center the click landed in
-      const snapped = snapToTile(mx, my);
-      const clampedY = Math.max(TILE + TILE / 2, Math.min(H - TILE - TILE / 2, snapped.y));
-      s.target = { x: snapped.x, y: clampedY };
+      // empty tap — move toward that spot (clamped to the map)
+      s.target = {
+        x: clamp(mx, 20, MAP_W - 20),
+        y: clamp(my, 20, MAP_H - 20),
+      };
+      playStep();
     },
-    [onSelectGame],
+    [onSelectGame, onOpenMyDino, onOpenQuestGiver],
   );
 
   return (
@@ -319,7 +427,7 @@ export function Valley({ onSelectGame }: { onSelectGame: (id: GameId) => void })
       onClick={handleClick}
       onTouchEnd={handleClick}
       role="application"
-      aria-label="Dino Valley - walk around the valley and tap a place to visit"
+      aria-label="Dino Valley, walk around the valley and tap a place to visit"
       style={{ cursor: 'none', borderRadius: 16, display: 'block', width: '100%', maxWidth: W }}
     />
   );
@@ -330,84 +438,49 @@ function drawLocation(
   loc: ValleyLocation,
   hovered: boolean,
   time: number,
+  camX: number,
+  camY: number,
 ) {
+  const img = loadUrl(loc.url);
+  if (!img.complete || img.naturalWidth === 0) return;
   const bob = Math.sin(time * 1.5 + loc.x * 0.01) * 3;
-  const iconImg = getGameIconImage(loc.id);
-  const hasSprite = iconImg && iconImg.complete && iconImg.naturalWidth > 0;
+  const sw = loc.w * ZOOM;
+  const sh = loc.h * ZOOM;
+  const sx = (loc.x - camX) * ZOOM;
+  const sy = (loc.y - camY) * ZOOM + bob;
 
-  // base shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';
-  ctx.beginPath();
-  ctx.ellipse(loc.x, loc.y + 36, 32, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  if (hasSprite) {
-    // draw the sprite art directly (no backing disc needed)
-    const spriteH = 90;
-    const aspect = iconImg.naturalWidth / iconImg.naturalHeight;
-    const spriteW = spriteH * aspect;
-    ctx.save();
-    if (hovered) {
-      ctx.shadowColor = 'rgba(255,255,255,0.8)';
-      ctx.shadowBlur = 16;
-    }
-    ctx.drawImage(
-      iconImg,
-      loc.x - spriteW / 2,
-      loc.y + bob - spriteH / 2 + 6,
-      spriteW,
-      spriteH,
-    );
-    ctx.restore();
-  } else {
-    // platform disc fallback + emoji (e.g. Volcano without a PNG)
-    ctx.save();
-    ctx.fillStyle = loc.color;
-    ctx.shadowColor = hovered ? loc.color : 'transparent';
-    ctx.shadowBlur = hovered ? 18 : 0;
-    ctx.beginPath();
-    ctx.arc(loc.x, loc.y + 4 + bob, 36, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.strokeStyle = hovered ? '#fff' : 'rgba(255,255,255,0.7)';
-    ctx.lineWidth = hovered ? 3 : 2;
-    ctx.beginPath();
-    ctx.arc(loc.x, loc.y + 4 + bob, 36, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.save();
-    ctx.font = '38px serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(loc.icon, loc.x, loc.y + 5 + bob);
-    ctx.restore();
+  ctx.save();
+  if (hovered) {
+    ctx.shadowColor = 'rgba(255,255,255,0.9)';
+    ctx.shadowBlur = 22;
   }
+  ctx.drawImage(img, sx, sy, sw, sh);
+  ctx.restore();
 
-  // label
+  const cx = sx + sw / 2;
+  const labelY = sy - 8;
+
   ctx.save();
   ctx.fillStyle = '#fff';
-  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
   ctx.lineWidth = 3;
   ctx.lineJoin = 'round';
   ctx.font = 'bold 14px Fredoka, sans-serif';
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-  ctx.strokeText(loc.name, loc.x, loc.y - 36 + bob);
-  ctx.fillText(loc.name, loc.x, loc.y - 36 + bob);
+  ctx.strokeText(loc.name, cx, labelY);
+  ctx.fillText(loc.name, cx, labelY);
   ctx.restore();
 
-  // subtitle on hover
   if (hovered) {
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
     ctx.beginPath();
-    ctx.roundRect(loc.x - 60, loc.y + 48, 120, 22, 8);
+    ctx.roundRect(cx - 64, sy + sh + 4, 128, 22, 8);
     ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.font = '12px Fredoka, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(loc.description, loc.x, loc.y + 63);
+    ctx.fillText(loc.description, cx, sy + sh + 19);
     ctx.restore();
   }
 }
@@ -419,12 +492,16 @@ function drawAvatar(
     facing: WalkDirection;
     moving: boolean;
     target: { x: number; y: number; locationId?: LocationId } | null;
+    camX: number;
+    camY: number;
   },
   avatar: ReturnType<typeof getAvatar>,
   time: number,
 ) {
-  // target indicator (ring at destination)
+  // target ring (at tap destination)
   if (s.target) {
+    const tx = (s.target.x - s.camX) * ZOOM;
+    const ty = (s.target.y - s.camY) * ZOOM;
     ctx.save();
     const pulse = 0.5 + Math.sin(time * 5) * 0.3;
     ctx.globalAlpha = pulse;
@@ -432,17 +509,101 @@ function drawAvatar(
     ctx.lineWidth = 3;
     ctx.setLineDash([4, 6]);
     ctx.beginPath();
-    ctx.arc(s.target.x, s.target.y, 18, 0, Math.PI * 2);
+    ctx.arc(tx, ty, 14, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
 
-  const color = avatar?.color ?? '#4CAF50';
   const species = avatar?.species ?? 'rex';
-  const size = 40;
-  const bob = s.moving ? Math.sin(time * 10) * 4 : Math.sin(time * 2.5) * 2;
-  const facingLeft = s.facing === 'left';
-  // drawDino's feet sit at y + size * 0.84; align them near the tile's bottom with a slight lift
-  const feetOffset = TILE / 2 - size * 0.84 - 8;
-  drawDino(ctx, s.player.x, s.player.y + feetOffset + bob, size, color, facingLeft, species, 0, 0);
+  const stage = getGrowthStage(getEarnedStickerCount());
+  const isEgg = stage.index <= 3;
+  const size = isEgg ? 30 : 38;
+  const bob = isEgg
+    ? Math.sin(time * 1.5) * 1.2
+    : s.moving ? Math.sin(time * 10) * 4 : Math.sin(time * 2.5) * 2;
+  const facingLeft = !isEgg && s.facing === 'left';
+  drawAvatarSprite(
+    ctx,
+    (s.player.x - s.camX) * ZOOM,
+    (s.player.y - s.camY) * ZOOM + bob,
+    size,
+    species,
+    stage.index,
+    facingLeft,
+  );
+}
+
+function drawQuestGiver(
+  ctx: CanvasRenderingContext2D,
+  hovered: boolean,
+  time: number,
+  hasQuestAvailable: boolean,
+  hasActiveQuest: boolean,
+  camX: number,
+  camY: number,
+) {
+  const x = (QUEST_GIVER.x - camX) * ZOOM;
+  const y = (QUEST_GIVER.y - camY) * ZOOM;
+  const bob = Math.sin(time * 1.2) * 3;
+
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 42, 28, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const img = getQuillSpriteImage();
+  if (img.complete && img.naturalWidth > 0) {
+    const spriteH = 88;
+    const aspect = img.naturalWidth / img.naturalHeight;
+    const spriteW = spriteH * aspect;
+    ctx.save();
+    if (hovered || hasQuestAvailable) {
+      ctx.shadowColor = hasQuestAvailable ? 'rgba(255,213,79,0.95)' : 'rgba(255,255,255,0.75)';
+      ctx.shadowBlur = hasQuestAvailable ? 20 + Math.sin(time * 4) * 4 : 14;
+    }
+    ctx.drawImage(img, x - spriteW / 2, y - spriteH / 2 + bob, spriteW, spriteH);
+    ctx.restore();
+  }
+
+  // label
+  ctx.save();
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.font = 'bold 13px Fredoka, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.strokeText(QUEST_GIVER.name, x, y - 54 + bob);
+  ctx.fillText(QUEST_GIVER.name, x, y - 54 + bob);
+  ctx.restore();
+
+  // callout
+  if (hasQuestAvailable) {
+    const pulse = 1 + Math.sin(time * 5) * 0.12;
+    ctx.save();
+    ctx.translate(x + 26, y - 36 + bob);
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath();
+    ctx.arc(0, 0, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#8D6E63';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#3E2723';
+    ctx.font = 'bold 15px Fredoka, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!', 0, 1);
+    ctx.restore();
+  } else if (hasActiveQuest) {
+    ctx.save();
+    ctx.fillStyle = '#4CAF50';
+    ctx.beginPath();
+    ctx.arc(x + 26, y - 36 + bob, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 }

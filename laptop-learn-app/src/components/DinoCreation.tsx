@@ -1,8 +1,13 @@
 import { useRef, useCallback } from 'react';
-import { drawDino, drawCustomCursor } from '../games/shared/draw';
+import { drawCustomCursor } from '../games/shared/draw';
 import { useGameCanvas } from '../games/shared/useGameCanvas';
 import { playPop, playCelebration } from '../games/shared/audio';
-import { AVATAR_SPECIES, AVATAR_COLORS, setAvatar } from '../games/shared/avatar';
+import {
+  AVATAR_SPECIES,
+  AVATAR_COLORS,
+  drawAvatarSprite,
+  setAvatar,
+} from '../games/shared/avatar';
 import type { Avatar } from '../games/shared/avatar';
 import { getActiveProfile } from '../games/shared/profile';
 import { spawnCelebration, updateParticles, drawParticles } from '../games/shared/particles';
@@ -11,25 +16,21 @@ import type { Particle } from '../games/shared/types';
 const W = 800;
 const H = 600;
 
-type Step = 'species' | 'color' | 'done';
-
 interface Hit {
-  kind: 'species' | 'color' | 'next' | 'back';
+  kind: 'species' | 'next';
   index?: number;
   rect: { x: number; y: number; w: number; h: number };
 }
 
 export function DinoCreation({ onDone }: { onDone: () => void }) {
-  const stepRef = useRef<Step>('species');
   const speciesRef = useRef(0);
-  const colorRef = useRef(0);
   const hitsRef = useRef<Hit[]>([]);
   const particlesRef = useRef<Particle[]>([]);
 
   const finish = useCallback(() => {
     const avatar: Avatar = {
       species: AVATAR_SPECIES[speciesRef.current].species,
-      color: AVATAR_COLORS[colorRef.current].value,
+      color: AVATAR_COLORS[0].value,
     };
     setAvatar(avatar);
     playCelebration();
@@ -67,172 +68,96 @@ export function DinoCreation({ onDone }: { onDone: () => void }) {
         ctx.restore();
       }
 
-      const step = stepRef.current;
       const speciesIdx = speciesRef.current;
-      const colorIdx = colorRef.current;
 
       // title
-      const title = step === 'species' ? 'Pick your dino!' : 'Pick a color!';
       ctx.fillStyle = '#fff';
       ctx.strokeStyle = 'rgba(0,0,0,0.35)';
       ctx.lineWidth = 4;
       ctx.lineJoin = 'round';
       ctx.font = 'bold 38px Fredoka, sans-serif';
       ctx.textAlign = 'center';
-      ctx.strokeText(title, W / 2, 70);
-      ctx.fillText(title, W / 2, 70);
+      ctx.strokeText('Pick your dino!', W / 2, 70);
+      ctx.fillText('Pick your dino!', W / 2, 70);
 
       // subtitle: active profile
       ctx.fillStyle = 'rgba(255,255,255,0.8)';
       ctx.font = '14px Fredoka, sans-serif';
       ctx.fillText(`Choosing for ${getActiveProfile()}`, W / 2, 94);
 
-      // preview dino (large)
+      // preview dino (large, as egg — what they start as)
       const previewCx = W / 2;
-      const previewCy = step === 'species' ? 210 : 220;
+      const previewCy = 210;
       const bob = Math.sin(mouse.time * 2.5) * 5;
-      drawDino(
+      drawAvatarSprite(
         ctx,
         previewCx,
         previewCy + bob,
-        step === 'species' ? 90 : 110,
-        AVATAR_COLORS[colorIdx].value,
-        false,
+        110,
         AVATAR_SPECIES[speciesIdx].species,
-        0,
-        0,
+        0, // egg stage — starts as egg
       );
 
-      if (step === 'species') {
-        // species picker row
-        const rowY = 360;
-        const gap = 14;
-        const boxW = 120;
-        const boxH = 150;
-        const totalW = AVATAR_SPECIES.length * boxW + (AVATAR_SPECIES.length - 1) * gap;
-        const startX = (W - totalW) / 2;
+      // hint beneath preview
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.font = '16px Fredoka, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Earn stickers to help your dino grow!', W / 2, 310);
 
-        for (let i = 0; i < AVATAR_SPECIES.length; i++) {
-          const x = startX + i * (boxW + gap);
-          const y = rowY;
-          const selected = i === speciesIdx;
-          const hovered =
-            mouse.mouseX >= x && mouse.mouseX <= x + boxW &&
-            mouse.mouseY >= y && mouse.mouseY <= y + boxH;
+      // species picker row — show the Grown form so kids know what they'll get
+      const rowY = 355;
+      const gap = 14;
+      const boxW = 130;
+      const boxH = 160;
+      const totalW = AVATAR_SPECIES.length * boxW + (AVATAR_SPECIES.length - 1) * gap;
+      const startX = (W - totalW) / 2;
 
-          ctx.save();
-          ctx.fillStyle = selected ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.55)';
+      for (let i = 0; i < AVATAR_SPECIES.length; i++) {
+        const x = startX + i * (boxW + gap);
+        const y = rowY;
+        const selected = i === speciesIdx;
+        const hovered =
+          mouse.mouseX >= x && mouse.mouseX <= x + boxW &&
+          mouse.mouseY >= y && mouse.mouseY <= y + boxH;
+
+        ctx.save();
+        ctx.fillStyle = selected ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.55)';
+        ctx.beginPath();
+        ctx.roundRect(x, y, boxW, boxH, 16);
+        ctx.fill();
+        if (selected || hovered) {
+          ctx.shadowColor = selected ? 'rgba(76,175,80,0.6)' : 'rgba(255,255,255,0.4)';
+          ctx.shadowBlur = selected ? 18 : 10;
+          ctx.strokeStyle = selected ? '#4CAF50' : 'rgba(255,255,255,0.9)';
+          ctx.lineWidth = selected ? 4 : 2;
           ctx.beginPath();
           ctx.roundRect(x, y, boxW, boxH, 16);
-          ctx.fill();
-          if (selected || hovered) {
-            ctx.shadowColor = selected ? 'rgba(76,175,80,0.6)' : 'rgba(255,255,255,0.4)';
-            ctx.shadowBlur = selected ? 18 : 10;
-            ctx.strokeStyle = selected ? '#4CAF50' : 'rgba(255,255,255,0.9)';
-            ctx.lineWidth = selected ? 4 : 2;
-            ctx.beginPath();
-            ctx.roundRect(x, y, boxW, boxH, 16);
-            ctx.stroke();
-          }
-          ctx.restore();
-
-          // dino sprite
-          const sBob = selected ? Math.sin(mouse.time * 4) * 3 : 0;
-          drawDino(
-            ctx,
-            x + boxW / 2,
-            y + boxH / 2 - 8 + sBob,
-            55,
-            AVATAR_COLORS[colorIdx].value,
-            false,
-            AVATAR_SPECIES[i].species,
-            0,
-            0,
-          );
-
-          ctx.fillStyle = 'rgba(0,0,0,0.65)';
-          ctx.font = 'bold 13px Fredoka, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(AVATAR_SPECIES[i].label, x + boxW / 2, y + boxH - 14);
-
-          hits.push({ kind: 'species', index: i, rect: { x, y, w: boxW, h: boxH } });
+          ctx.stroke();
         }
-      } else {
-        // color picker grid
-        const perRow = 4;
-        const rows = Math.ceil(AVATAR_COLORS.length / perRow);
-        const boxW = 100;
-        const boxH = 70;
-        const gap = 12;
-        const gridW = perRow * boxW + (perRow - 1) * gap;
-        const startX = (W - gridW) / 2;
-        const startY = 340;
-
-        for (let i = 0; i < AVATAR_COLORS.length; i++) {
-          const col = i % perRow;
-          const row = Math.floor(i / perRow);
-          const x = startX + col * (boxW + gap);
-          const y = startY + row * (boxH + gap);
-          const selected = i === colorIdx;
-          const hovered =
-            mouse.mouseX >= x && mouse.mouseX <= x + boxW &&
-            mouse.mouseY >= y && mouse.mouseY <= y + boxH;
-
-          ctx.save();
-          ctx.fillStyle = AVATAR_COLORS[i].value;
-          ctx.beginPath();
-          ctx.roundRect(x, y, boxW, boxH, 14);
-          ctx.fill();
-          if (selected || hovered) {
-            ctx.shadowColor = selected ? '#fff' : 'rgba(255,255,255,0.5)';
-            ctx.shadowBlur = selected ? 18 : 8;
-            ctx.strokeStyle = selected ? '#fff' : 'rgba(255,255,255,0.7)';
-            ctx.lineWidth = selected ? 4 : 2;
-            ctx.beginPath();
-            ctx.roundRect(x, y, boxW, boxH, 14);
-            ctx.stroke();
-          }
-          ctx.restore();
-
-          ctx.fillStyle = 'rgba(0,0,0,0.65)';
-          ctx.font = 'bold 12px Fredoka, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(AVATAR_COLORS[i].label, x + boxW / 2, y + boxH - 10);
-          // subtle checkmark on selected
-          if (selected) {
-            ctx.fillStyle = 'rgba(255,255,255,0.95)';
-            ctx.font = 'bold 22px Fredoka, sans-serif';
-            ctx.fillText('✓', x + boxW / 2, y + boxH / 2);
-          }
-
-          hits.push({ kind: 'color', index: i, rect: { x, y, w: boxW, h: boxH } });
-        }
-
-        // back button
-        const backW = 120;
-        const backH = 54;
-        const backX = W / 2 - 200;
-        const backY = H - 90;
-        const backHover =
-          mouse.mouseX >= backX && mouse.mouseX <= backX + backW &&
-          mouse.mouseY >= backY && mouse.mouseY <= backY + backH;
-        ctx.save();
-        ctx.fillStyle = backHover ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.6)';
-        ctx.beginPath();
-        ctx.roundRect(backX, backY, backW, backH, 14);
-        ctx.fill();
-        ctx.fillStyle = '#333';
-        ctx.font = 'bold 16px Fredoka, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('← Back', backX + backW / 2, backY + backH / 2 + 6);
         ctx.restore();
-        hits.push({ kind: 'back', rect: { x: backX, y: backY, w: backW, h: backH } });
+
+        const sBob = selected ? Math.sin(mouse.time * 4) * 3 : 0;
+        drawAvatarSprite(
+          ctx,
+          x + boxW / 2,
+          y + boxH / 2 - 12 + sBob,
+          60,
+          AVATAR_SPECIES[i].species,
+          6, // show the grown form so kids know what they'll become
+        );
+
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.font = 'bold 13px Fredoka, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(AVATAR_SPECIES[i].label, x + boxW / 2, y + boxH - 14);
+
+        hits.push({ kind: 'species', index: i, rect: { x, y, w: boxW, h: boxH } });
       }
 
       // next/done button
-      const btnW = step === 'species' ? 180 : 180;
+      const btnW = 200;
       const btnH = 54;
-      const btnX = step === 'species' ? (W - btnW) / 2 : W / 2 + 20;
+      const btnX = (W - btnW) / 2;
       const btnY = H - 90;
       const btnHover =
         mouse.mouseX >= btnX && mouse.mouseX <= btnX + btnW &&
@@ -254,7 +179,7 @@ export function DinoCreation({ onDone }: { onDone: () => void }) {
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 18px Fredoka, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(step === 'species' ? 'Next →' : "That's my dino!", btnX + btnW / 2, btnY + btnH / 2 + 7);
+      ctx.fillText("That's my egg!", btnX + btnW / 2, btnY + btnH / 2 + 7);
       hits.push({ kind: 'next', rect: { x: btnX, y: btnY, w: btnW, h: btnH } });
 
       drawParticles(ctx, particlesRef.current);
@@ -290,22 +215,8 @@ export function DinoCreation({ onDone }: { onDone: () => void }) {
             particlesRef.current.push(
               ...spawnCelebration(hit.rect.x + hit.rect.w / 2, hit.rect.y + hit.rect.h / 2, 4),
             );
-          } else if (hit.kind === 'color' && hit.index !== undefined) {
-            colorRef.current = hit.index;
-            playPop();
-            particlesRef.current.push(
-              ...spawnCelebration(hit.rect.x + hit.rect.w / 2, hit.rect.y + hit.rect.h / 2, 4),
-            );
           } else if (hit.kind === 'next') {
-            if (stepRef.current === 'species') {
-              stepRef.current = 'color';
-              playPop();
-            } else {
-              finish();
-            }
-          } else if (hit.kind === 'back') {
-            stepRef.current = 'species';
-            playPop();
+            finish();
           }
           break;
         }

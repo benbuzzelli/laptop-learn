@@ -456,9 +456,9 @@ export function DinoPath({ onBack }: { onBack: () => void }) {
           ctx.strokeStyle = 'rgba(0,0,0,0.5)';
           ctx.lineWidth = 3;
           ctx.lineJoin = 'round';
-          ctx.strokeText('Dead end — go back!', fork.x, fork.y - 28);
+          ctx.strokeText('Dead end, go back!', fork.x, fork.y - 28);
           ctx.fillStyle = '#FFCC80';
-          ctx.fillText('Dead end — go back!', fork.x, fork.y - 28);
+          ctx.fillText('Dead end, go back!', fork.x, fork.y - 28);
           ctx.restore();
         }
       }
