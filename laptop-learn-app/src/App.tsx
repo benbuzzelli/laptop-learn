@@ -25,6 +25,9 @@ import {
   completedToday,
   acceptQuest,
   getQuestById,
+  getActiveQuest,
+  hasSeenQuillIntro,
+  markQuillIntroSeen,
   QUEST_GAME_TO_APP,
 } from './games/shared/quests';
 import { consumePendingQuestEvent } from './games/shared/stickers';
@@ -261,7 +264,23 @@ function App() {
     }
   }, [currentGame]);
 
-  const handleOpenQuestGiver = useCallback(() => {
+  const showDailyQuestOverlay = useCallback(() => {
+    // Active quest wins: show the continue flow so Quill doesn't re-pitch a
+    // different randomly-picked daily on top of an in-progress adventure.
+    const active = getActiveQuest();
+    if (active) {
+      const quest = getQuestById(active.id);
+      const step = quest?.steps[active.stepIndex];
+      if (quest && step) {
+        setQuestOverlay({
+          kind: 'questContinue',
+          quest,
+          currentStep: step,
+          stepIndex: active.stepIndex,
+        });
+        return;
+      }
+    }
     const quest = getTodaysQuest();
     setQuestOverlay({
       kind: 'intro',
@@ -269,6 +288,19 @@ function App() {
       alreadyCompletedToday: completedToday(),
     });
   }, []);
+
+  const handleOpenQuestGiver = useCallback(() => {
+    if (!hasSeenQuillIntro()) {
+      setQuestOverlay({ kind: 'quillIntro' });
+      return;
+    }
+    showDailyQuestOverlay();
+  }, [showDailyQuestOverlay]);
+
+  const handleMeetQuillDone = useCallback(() => {
+    markQuillIntroSeen();
+    showDailyQuestOverlay();
+  }, [showDailyQuestOverlay]);
 
   const handleAcceptQuest = useCallback(() => {
     if (questOverlay?.kind !== 'intro') return;
@@ -504,6 +536,7 @@ function App() {
         onAccept={handleAcceptQuest}
         onContinue={() => setQuestOverlay(null)}
         onGoToGame={handleQuestGoToGame}
+        onMeetQuillDone={handleMeetQuillDone}
       />
 
       <QuillBubble />

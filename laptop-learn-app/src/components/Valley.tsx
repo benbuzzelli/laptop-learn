@@ -15,6 +15,7 @@ import {
   getActiveQuest,
   getQuestById,
   completedToday,
+  QUEST_GAME_TO_APP,
 } from '../games/shared/quests';
 import { getQuillSpriteImage } from '../games/shared/quill';
 import type { GameId } from '../games/shared/types';
@@ -243,6 +244,18 @@ export function Valley({
       const questDone = completedToday();
       const hasQuestAvailable = !questDone && !activeQuest;
 
+      // If a quest step targets one of our locations, remember it so we can
+      // float a marker above it after the y-sorted pass.
+      let questTargetLoc: ValleyLocation | null = null;
+      if (activeQuest) {
+        const quest = getQuestById(activeQuest.id);
+        const step = quest?.steps[activeQuest.stepIndex];
+        if (step) {
+          const appId = QUEST_GAME_TO_APP[step.gameId] as LocationId;
+          questTargetLoc = LOCATIONS.find((l) => l.id === appId) ?? null;
+        }
+      }
+
       type Drawable =
         | { kind: 'location'; loc: ValleyLocation; y: number }
         | { kind: 'player'; y: number }
@@ -262,6 +275,60 @@ export function Valley({
         } else {
           drawQuestGiver(ctx, s.hoverQuestGiver, mouse.time, hasQuestAvailable, !!activeQuest, camX, camY);
         }
+      }
+
+      // --- floating quest marker above the active-step location ---
+      if (questTargetLoc) {
+        const loc = questTargetLoc;
+        const cx = (loc.x - camX + loc.w / 2) * ZOOM;
+        const topY = (loc.y - camY) * ZOOM;
+        const float = Math.sin(mouse.time * 3.2) * 5;
+        const markerY = topY - 30 + float;
+
+        // soft glow
+        ctx.save();
+        ctx.globalAlpha = 0.6 + Math.sin(mouse.time * 4) * 0.15;
+        const glow = ctx.createRadialGradient(cx, markerY, 2, cx, markerY, 34);
+        glow.addColorStop(0, 'rgba(255,213,79,0.9)');
+        glow.addColorStop(1, 'rgba(255,213,79,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(cx, markerY, 34, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // pulsing yellow coin with "!"
+        const pulse = 1 + Math.sin(mouse.time * 5) * 0.1;
+        ctx.save();
+        ctx.translate(cx, markerY);
+        ctx.scale(pulse, pulse);
+        ctx.fillStyle = '#FFD54F';
+        ctx.beginPath();
+        ctx.arc(0, 0, 15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#8D6E63';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.fillStyle = '#3E2723';
+        ctx.font = 'bold 20px Fredoka, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', 0, 1);
+        ctx.restore();
+
+        // downward pointer anchor so the marker reads as "this spot"
+        ctx.save();
+        ctx.fillStyle = '#FFD54F';
+        ctx.strokeStyle = '#8D6E63';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx - 6, markerY + 12);
+        ctx.lineTo(cx + 6, markerY + 12);
+        ctx.lineTo(cx, markerY + 22);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
       }
 
       // --- active quest banner (screen-space, bottom) ---
@@ -463,19 +530,6 @@ function drawLocation(
   ctx.drawImage(img, sx, sy, sw, sh);
   ctx.restore();
 
-  const labelY = sy - 8;
-
-  ctx.save();
-  ctx.fillStyle = '#fff';
-  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-  ctx.lineWidth = 3;
-  ctx.lineJoin = 'round';
-  ctx.font = 'bold 14px Fredoka, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.strokeText(loc.name, cx, labelY);
-  ctx.fillText(loc.name, cx, labelY);
-  ctx.restore();
-
   if (hovered) {
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
@@ -571,44 +625,46 @@ function drawQuestGiver(
     ctx.restore();
   }
 
-  // label
-  ctx.save();
-  ctx.fillStyle = '#fff';
-  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-  ctx.lineWidth = 3;
-  ctx.lineJoin = 'round';
-  ctx.font = 'bold 13px Fredoka, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-  ctx.strokeText(QUEST_GIVER.name, x, y - 54 + bob);
-  ctx.fillText(QUEST_GIVER.name, x, y - 54 + bob);
-  ctx.restore();
-
-  // callout
+  // callout centered above Quill's head
+  const indicatorX = x;
+  const indicatorY = y - 58 + bob;
   if (hasQuestAvailable) {
     const pulse = 1 + Math.sin(time * 5) * 0.12;
     ctx.save();
-    ctx.translate(x + 26, y - 36 + bob);
+    ctx.translate(indicatorX, indicatorY);
     ctx.scale(pulse, pulse);
     ctx.fillStyle = '#FFD700';
     ctx.beginPath();
-    ctx.arc(0, 0, 11, 0, Math.PI * 2);
+    ctx.arc(0, 0, 12, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#8D6E63';
     ctx.lineWidth = 2;
     ctx.stroke();
     ctx.fillStyle = '#3E2723';
-    ctx.font = 'bold 15px Fredoka, sans-serif';
+    ctx.font = 'bold 16px Fredoka, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('!', 0, 1);
     ctx.restore();
   } else if (hasActiveQuest) {
+    // "Continue your quest" — same shape as the new-quest "!" callout so it
+    // reads as a deliberate marker, just in a calmer green.
+    const pulse = 1 + Math.sin(time * 3.5) * 0.08;
     ctx.save();
+    ctx.translate(indicatorX, indicatorY);
+    ctx.scale(pulse, pulse);
     ctx.fillStyle = '#4CAF50';
     ctx.beginPath();
-    ctx.arc(x + 26, y - 36 + bob, 7, 0, Math.PI * 2);
+    ctx.arc(0, 0, 12, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = '#2E5D2F';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 15px Fredoka, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('→', 0, 1);
     ctx.restore();
   }
 }
