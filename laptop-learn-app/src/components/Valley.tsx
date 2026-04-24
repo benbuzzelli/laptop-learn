@@ -437,27 +437,32 @@ function drawLocation(
   ctx: CanvasRenderingContext2D,
   loc: ValleyLocation,
   hovered: boolean,
-  time: number,
+  _time: number,
   camX: number,
   camY: number,
 ) {
   const img = loadUrl(loc.url);
   if (!img.complete || img.naturalWidth === 0) return;
-  const bob = Math.sin(time * 1.5 + loc.x * 0.01) * 3;
-  const sw = loc.w * ZOOM;
-  const sh = loc.h * ZOOM;
-  const sx = (loc.x - camX) * ZOOM;
-  const sy = (loc.y - camY) * ZOOM + bob;
+  // on hover, scale up ~8% around the icon's center and brighten.
+  const scale = hovered ? 1.08 : 1;
+  const baseW = loc.w * ZOOM;
+  const baseH = loc.h * ZOOM;
+  const sw = baseW * scale;
+  const sh = baseH * scale;
+  const cx = (loc.x - camX + loc.w / 2) * ZOOM;
+  const cyTop = (loc.y - camY) * ZOOM;
+  const sx = cx - sw / 2;
+  const sy = cyTop - (sh - baseH) / 2;
 
   ctx.save();
   if (hovered) {
-    ctx.shadowColor = 'rgba(255,255,255,0.9)';
-    ctx.shadowBlur = 22;
+    ctx.shadowColor = 'rgba(255,235,150,0.95)';
+    ctx.shadowBlur = 26;
+    ctx.filter = 'brightness(1.12)';
   }
   ctx.drawImage(img, sx, sy, sw, sh);
   ctx.restore();
 
-  const cx = sx + sw / 2;
   const labelY = sy - 8;
 
   ctx.save();
