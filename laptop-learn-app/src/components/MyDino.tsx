@@ -15,8 +15,15 @@ import {
 const W = 800;
 const H = 600;
 
-export function MyDino({ onBack }: { onBack: () => void }) {
+export function MyDino({
+  onBack,
+  onOpenStickerBook,
+}: {
+  onBack: () => void;
+  onOpenStickerBook?: () => void;
+}) {
   const backHitRef = useRef({ x: 16, y: 16, w: 100, h: 44 });
+  const stickerBtnRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
 
   const { canvasRef } = useGameCanvas({
     width: W,
@@ -218,6 +225,34 @@ export function MyDino({ onBack }: { onBack: () => void }) {
         );
       }
 
+      // "See my stickers" button, bottom-right
+      const btnW = 200;
+      const btnH = 44;
+      const btnX = W - btnW - 24;
+      const btnY = H - btnH - 18;
+      const btnHover =
+        mouse.mouseX >= btnX && mouse.mouseX <= btnX + btnW &&
+        mouse.mouseY >= btnY && mouse.mouseY <= btnY + btnH;
+      stickerBtnRef.current = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+      ctx.save();
+      ctx.fillStyle = btnHover ? '#FFD54F' : '#FFB300';
+      ctx.strokeStyle = '#6F4E37';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = btnHover ? 'rgba(255,213,79,0.5)' : 'transparent';
+      ctx.shadowBlur = btnHover ? 14 : 0;
+      ctx.beginPath();
+      ctx.roundRect(btnX, btnY, btnW, btnH, 14);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.fillStyle = '#3E2723';
+      ctx.font = 'bold 17px Fredoka, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⭐ My Stickers →', btnX + btnW / 2, btnY + btnH / 2 + 1);
+
       // back button
       drawBackButton(ctx, 16, 16, mouse.mouseX, mouse.mouseY);
       drawCustomCursor(ctx, mouse.mouseX, mouse.mouseY, !mouse.isTouch, mouse.mouseDown);
@@ -242,9 +277,15 @@ export function MyDino({ onBack }: { onBack: () => void }) {
       if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
         playPop();
         onBack();
+        return;
+      }
+      const sb = stickerBtnRef.current;
+      if (sb && mx >= sb.x && mx <= sb.x + sb.w && my >= sb.y && my <= sb.y + sb.h) {
+        playPop();
+        onOpenStickerBook?.();
       }
     },
-    [onBack],
+    [onBack, onOpenStickerBook],
   );
 
   return (

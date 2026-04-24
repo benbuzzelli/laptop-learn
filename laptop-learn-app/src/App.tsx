@@ -9,6 +9,7 @@ import { JungleExplorer } from './games/jungle-explorer/JungleExplorer';
 import { DinoDungeon } from './games/dino-dungeon/DinoDungeon';
 import { DinoCollection } from './components/DinoCollection';
 import { MyDino } from './components/MyDino';
+import { StickerBook } from './components/StickerBook';
 import { ParentDashboard } from './components/ParentDashboard';
 import { DinoCreation } from './components/DinoCreation';
 import { LevelEditor } from './components/LevelEditor';
@@ -58,6 +59,7 @@ function App() {
 
   const [currentGame, setCurrentGame] = useState<GameId | null>(null);
   const [showMyDino, setShowMyDino] = useState(false);
+  const [showStickerBook, setShowStickerBook] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [questOverlay, setQuestOverlay] = useState<QuestOverlayMode>(null);
   const [gameKey, setGameKey] = useState(0);
@@ -348,9 +350,10 @@ function App() {
       };
       return labels[currentGame];
     }
+    if (showStickerBook) return 'Sticker Book';
     if (showMyDino) return 'My Dino';
     return 'Dino Valley';
-  }, [sessionExpired, needsAvatar, showParentDash, currentGame, showMyDino]);
+  }, [sessionExpired, needsAvatar, showParentDash, currentGame, showMyDino, showStickerBook]);
 
   return (
     <div
@@ -376,15 +379,21 @@ function App() {
         />
       ) : (
         <>
-          {currentGame === null && !showMyDino && (
+          {currentGame === null && !showMyDino && !showStickerBook && (
             <Valley
               onSelectGame={handleSelectGame}
               onOpenMyDino={() => setShowMyDino(true)}
               onOpenQuestGiver={handleOpenQuestGiver}
             />
           )}
-          {currentGame === null && showMyDino && (
-            <MyDino onBack={() => setShowMyDino(false)} />
+          {currentGame === null && showMyDino && !showStickerBook && (
+            <MyDino
+              onBack={() => setShowMyDino(false)}
+              onOpenStickerBook={() => setShowStickerBook(true)}
+            />
+          )}
+          {currentGame === null && showStickerBook && (
+            <StickerBook onBack={() => setShowStickerBook(false)} />
           )}
           {currentGame === 'egg-hunt' && <EggHunt key={gameKey} onBack={handleBack} />}
           {currentGame === 'spell-dino' && <SpellDino key={gameKey} onBack={handleBack} />}

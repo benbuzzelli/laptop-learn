@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { loadStickers } from '../games/shared/stickers';
+import { loadStickers, getStickerImageUrl } from '../games/shared/stickers';
 import { getDifficulty, setDifficulty, AGE_LABELS, DIFFICULTY_LABELS, DIFFICULTY_ORDER } from '../games/shared/difficulty';
 import type { Difficulty } from '../games/shared/difficulty';
 import { getVolume, setVolume, getMuted, setMuted } from '../games/shared/audio';
@@ -461,25 +461,55 @@ export function ParentDashboard({ onClose, onTimerRestart }: { onClose: () => vo
             gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
             gap: 8,
           }}>
-            {stickers.map((s) => (
-              <div key={s.id} style={{
-                background: s.earned ? 'rgba(76,175,80,0.15)' : 'rgba(255,255,255,0.03)',
-                border: s.earned ? '1px solid rgba(76,175,80,0.3)' : '1px solid rgba(255,255,255,0.06)',
-                borderRadius: 10,
-                padding: '8px 10px',
-                textAlign: 'center',
-              }}>
-                <div style={{ fontSize: 22 }}>{s.earned ? s.emoji : '🔒'}</div>
-                <div style={{ fontSize: 11, color: s.earned ? '#fff' : 'rgba(255,255,255,0.3)', marginTop: 2 }}>
-                  {s.name}
-                </div>
-                {!s.earned && (
-                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', marginTop: 2 }}>
-                    {s.progress}/{s.threshold}
+            {stickers.map((s) => {
+              const url = getStickerImageUrl(s.id);
+              return (
+                <div key={s.id} style={{
+                  background: s.earned ? 'rgba(76,175,80,0.15)' : 'rgba(255,255,255,0.03)',
+                  border: s.earned ? '1px solid rgba(76,175,80,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: 10,
+                  padding: '8px 10px',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 4,
+                }}>
+                  <div style={{
+                    width: 48,
+                    height: 48,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    {url ? (
+                      <img
+                        src={url}
+                        alt={s.name}
+                        style={{
+                          maxWidth: '100%',
+                          maxHeight: '100%',
+                          objectFit: 'contain',
+                          filter: s.earned ? 'none' : 'grayscale(1) opacity(0.35)',
+                        }}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 22, filter: s.earned ? 'none' : 'grayscale(1) opacity(0.35)' }}>
+                        {s.earned ? s.emoji : '🔒'}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
+                  <div style={{ fontSize: 11, color: s.earned ? '#fff' : 'rgba(255,255,255,0.3)' }}>
+                    {s.name}
+                  </div>
+                  {!s.earned && (
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>
+                      {s.progress}/{s.threshold}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Section>
 

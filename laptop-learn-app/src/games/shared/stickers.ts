@@ -1,7 +1,46 @@
 import type { Sticker } from './types';
 import { profileKey } from './profile';
-import { tryAdvanceQuest } from './quests';
+import { tryAdvanceQuest, QUEST_LIBRARY, getEarnedQuestStickers } from './quests';
 import type { QuestStepResult } from './quests';
+
+// Sticker PNGs from awards/stickers. Each id maps to the corresponding image.
+import stickerFirstHatch from './sprites/awards/stickers/first-match-1.png';
+import stickerEggExpert from './sprites/awards/stickers/egg-expert.png';
+import stickerFirstSteps from './sprites/awards/stickers/first-steps.png';
+import stickerPathFinder from './sprites/awards/stickers/path-finder.png';
+import stickerFirstWord from './sprites/awards/stickers/first-word.png';
+import stickerDinoScholar from './sprites/awards/stickers/dino-scholar.png';
+import stickerFirstEscape from './sprites/awards/stickers/first-escape.png';
+import stickerEscapeArtist from './sprites/awards/stickers/escape-artist.png';
+import stickerFirstMatch from './sprites/awards/stickers/first-match.png';
+import stickerMemoryMaster from './sprites/awards/stickers/memory-master.png';
+import stickerFirstDiscovery from './sprites/awards/stickers/first-discovery.png';
+import stickerJungleExpert from './sprites/awards/stickers/jungle-expert.png';
+import stickerFirstExpedition from './sprites/awards/stickers/first-expedition.png';
+import stickerDungeonMaster from './sprites/awards/stickers/dungeon-master.png';
+
+const STICKER_IMAGE_URLS: Record<string, string> = {
+  'egg-hunt-1': stickerFirstHatch,
+  'egg-hunt-5': stickerEggExpert,
+  'dino-path-1': stickerFirstSteps,
+  'dino-path-3': stickerPathFinder,
+  'spell-dino-1': stickerFirstWord,
+  'spell-dino-3': stickerDinoScholar,
+  'volcano-1': stickerFirstEscape,
+  'volcano-3': stickerEscapeArtist,
+  'dino-match-1': stickerFirstMatch,
+  'dino-match-3': stickerMemoryMaster,
+  'jungle-explorer-1': stickerFirstDiscovery,
+  'jungle-explorer-3': stickerJungleExpert,
+  'dino-dungeon-1': stickerFirstExpedition,
+  'dino-dungeon-3': stickerDungeonMaster,
+};
+
+export function getStickerImageUrl(id: string): string | null {
+  return STICKER_IMAGE_URLS[id] ?? null;
+}
+
+export const QUEST_STICKER_GAME = 'quest';
 
 // Light-weight bus so game code can trigger Quill bubbles without importing React.
 const QUILL_EVENT = 'quill:bubble';
@@ -62,7 +101,7 @@ export function loadStickers(): StickerWithProgress[] {
       localStorage.setItem(profileKey('stickers'), JSON.stringify(earnedIds));
     }
 
-    return ALL_STICKERS.map((s) => ({
+    const gameplayStickers: StickerWithProgress[] = ALL_STICKERS.map((s) => ({
       id: s.id,
       emoji: s.emoji,
       name: s.name,
@@ -71,6 +110,22 @@ export function loadStickers(): StickerWithProgress[] {
       earned: Array.isArray(earnedIds) && earnedIds.includes(s.id),
       progress: progress[s.game] ?? 0,
     }));
+
+    // Quest reward stickers — merged in so the sticker book shows them
+    // alongside the gameplay ones. Earned state comes from the profile-scoped
+    // 'questStickers' list written by grantQuestReward().
+    const earnedQuestIds = new Set(getEarnedQuestStickers());
+    const questStickers: StickerWithProgress[] = QUEST_LIBRARY.map((q) => ({
+      id: q.reward.stickerId,
+      emoji: q.reward.emoji,
+      name: q.reward.name,
+      game: QUEST_STICKER_GAME,
+      threshold: 1,
+      earned: earnedQuestIds.has(q.reward.stickerId),
+      progress: earnedQuestIds.has(q.reward.stickerId) ? 1 : 0,
+    }));
+
+    return [...gameplayStickers, ...questStickers];
   } catch {
     return ALL_STICKERS.map((s) => ({
       ...s,
