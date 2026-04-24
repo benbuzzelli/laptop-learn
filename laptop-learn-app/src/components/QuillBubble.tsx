@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getQuillEmoteUrl } from '../games/shared/quill';
 import type { QuillEmote } from '../games/shared/quill';
+import { FONT, color, fontSize, shadow } from '../ui';
 
 export interface QuillBubbleEventDetail {
   emote: QuillEmote;
@@ -82,15 +83,15 @@ export function QuillBubble() {
           pointerEvents: 'auto',
           cursor: 'pointer',
           background: 'linear-gradient(180deg, #fff7e0 0%, #ffd9a3 100%)',
-          border: '3px solid #8D6E63',
+          border: `3px solid ${color.woodMid}`,
           borderRadius: 18,
-          boxShadow: '0 10px 28px rgba(0,0,0,0.35)',
+          boxShadow: shadow.floating,
           padding: '12px 14px 12px 12px',
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          fontFamily: 'Fredoka, sans-serif',
-          color: '#3E2723',
+          fontFamily: FONT,
+          color: color.woodDarkest,
         }}
       >
         <img
@@ -102,11 +103,11 @@ export function QuillBubble() {
             objectFit: 'contain',
             borderRadius: '50%',
             background: 'rgba(255,255,255,0.85)',
-            border: '2px solid #8D6E63',
+            border: `2px solid ${color.woodMid}`,
             flexShrink: 0,
           }}
         />
-        <div style={{ fontSize: 17, lineHeight: 1.3, fontWeight: 600 }}>
+        <div style={{ fontSize: fontSize.lg, lineHeight: 1.3, fontWeight: 600 }}>
           {current.message}
         </div>
       </div>

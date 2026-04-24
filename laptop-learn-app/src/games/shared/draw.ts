@@ -1,5 +1,203 @@
 import { getDinoImage, getBabyDinoImage, getMouseImage, getWalkDinoFrame, WALK_FRAME_COUNT } from './dino-svgs';
 
+// Canvas equivalent of the React <Button> primitive — same stone-bevel look
+// so back/easy-mode/hint/keyboard buttons in games match the sticker-book
+// back button and the quest-overlay action buttons.
+type StoneButtonVariant = 'primary' | 'secondary';
+
+interface StoneButtonOptions {
+  label?: string;
+  icon?: string;
+  // For when a text character isn't enough — draws a custom icon at the
+  // button's center. Receives ctx, centerX, centerY, and the variant so it
+  // can pick contrasting colors.
+  drawIcon?: (ctx: CanvasRenderingContext2D, cx: number, cy: number, variant: StoneButtonVariant) => void;
+  variant?: StoneButtonVariant;
+  hovered?: boolean;
+  fontSize?: number;
+  borderRadius?: number;
+}
+
+export function drawStoneButton(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  opts: StoneButtonOptions = {},
+) {
+  const {
+    label,
+    icon,
+    drawIcon,
+    variant = 'secondary',
+    hovered = false,
+    fontSize = 16,
+    borderRadius = 12,
+  } = opts;
+
+  const isPrimary = variant === 'primary';
+
+  // Bottom bevel — a darker rounded rect peeking out 3px below the button.
+  ctx.save();
+  ctx.fillStyle = isPrimary ? '#1B5E20' : '#6D4C41';
+  ctx.beginPath();
+  ctx.roundRect(x, y + 3, w, h, borderRadius);
+  ctx.fill();
+  ctx.restore();
+
+  // Main button body with vertical gradient.
+  ctx.save();
+  const grad = ctx.createLinearGradient(x, y, x, y + h);
+  if (isPrimary) {
+    grad.addColorStop(0, '#7CC07A');
+    grad.addColorStop(0.55, '#4CAF50');
+    grad.addColorStop(1, '#2E7D32');
+  } else {
+    grad.addColorStop(0, '#F3E0B3');
+    grad.addColorStop(0.55, '#DEC08C');
+    grad.addColorStop(1, '#B89266');
+  }
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, borderRadius);
+  ctx.fill();
+
+  // Border.
+  ctx.strokeStyle = isPrimary ? '#2E5D2F' : '#6F4E37';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Inset highlight (top edge) — sells the bevel.
+  ctx.strokeStyle = isPrimary
+    ? 'rgba(255,255,255,0.35)'
+    : 'rgba(255,250,220,0.6)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + borderRadius, y + 1.5);
+  ctx.lineTo(x + w - borderRadius, y + 1.5);
+  ctx.stroke();
+
+  // Hover wash — a faint lightening on top of the gradient.
+  if (hovered) {
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, borderRadius);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Custom-drawn icon takes precedence.
+  if (drawIcon) {
+    drawIcon(ctx, x + w / 2, y + h / 2, variant);
+  } else {
+    // Label / emoji icon.
+    ctx.save();
+    ctx.fillStyle = isPrimary ? '#fff' : '#3E2723';
+    ctx.font = `bold ${fontSize}px Fredoka, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = isPrimary
+      ? 'rgba(0,0,0,0.35)'
+      : 'rgba(255,250,220,0.6)';
+    ctx.shadowOffsetY = 1;
+    ctx.shadowBlur = 0;
+    ctx.fillText(icon ?? label ?? '', x + w / 2, y + h / 2 + 1);
+    ctx.restore();
+  }
+
+  return { x, y, w, h };
+}
+
+// Small painted keyboard icon — two rows of four keys + a space bar on a
+// rounded backing plate. Designed to sit inside the 44×44 hint button at
+// ~30×20 size. Picks colors based on the variant so the icon reads on both
+// tan (secondary) and green (primary/active) stone-bevel buttons.
+export function drawKeyboardIcon(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  variant: StoneButtonVariant = 'secondary',
+) {
+  const w = 30;
+  const h = 20;
+  const x = cx - w / 2;
+  const y = cy - h / 2;
+  const isPrimary = variant === 'primary';
+
+  // Backing plate
+  const plate = isPrimary ? '#1B5E20' : '#3E2723';
+  const plateLight = isPrimary ? '#2E7D32' : '#5D4037';
+  const keyFill = isPrimary ? '#C9A77A' : '#FFF5DC';
+  const keyShade = isPrimary ? '#7A5A38' : '#6F4E37';
+
+  // Outer plate with 1px inner highlight line
+  ctx.save();
+  ctx.fillStyle = plate;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 3);
+  ctx.fill();
+
+  ctx.strokeStyle = plateLight;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x + 0.5, y + 0.5, w - 1, h - 1, 2.5);
+  ctx.stroke();
+  ctx.restore();
+
+  // Top row: 4 keys
+  const pad = 2.5;
+  const rowH = 4.5;
+  const gap = 1.2;
+  const cols = 4;
+  const innerW = w - pad * 2;
+  const keyW = (innerW - gap * (cols - 1)) / cols;
+
+  // Row 1
+  let ky = y + pad;
+  for (let i = 0; i < cols; i++) {
+    const kx = x + pad + i * (keyW + gap);
+    ctx.save();
+    ctx.fillStyle = keyFill;
+    ctx.strokeStyle = keyShade;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.roundRect(kx, ky, keyW, rowH, 1.2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Row 2
+  ky = y + pad + rowH + gap;
+  for (let i = 0; i < cols; i++) {
+    const kx = x + pad + i * (keyW + gap);
+    ctx.save();
+    ctx.fillStyle = keyFill;
+    ctx.strokeStyle = keyShade;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.roundRect(kx, ky, keyW, rowH, 1.2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Row 3: space bar (wide single key)
+  ky = y + pad + (rowH + gap) * 2;
+  const spaceW = innerW * 0.78;
+  const spaceX = x + w / 2 - spaceW / 2;
+  ctx.save();
+  ctx.fillStyle = keyFill;
+  ctx.strokeStyle = keyShade;
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.roundRect(spaceX, ky, spaceW, rowH - 0.5, 1.2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function expandHex(hex: string): string {
   if (hex.length === 4) return `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
   return hex;
@@ -293,29 +491,12 @@ export function drawBackButton(
   const bw = 100;
   const bh = 44;
   const hovered = mouseX > x && mouseX < x + bw && mouseY > y && mouseY < y + bh;
-
-  ctx.save();
-  ctx.fillStyle = hovered ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
-  ctx.beginPath();
-  ctx.roundRect(x, y, bw, bh, 14);
-  ctx.fill();
-
-  if (hovered) {
-    ctx.shadowColor = 'rgba(255,255,255,0.3)';
-    ctx.shadowBlur = 8;
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-  }
-
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 18px Fredoka, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('← Back', x + bw / 2, y + bh / 2 + 6);
-  ctx.restore();
-
-  return { x, y, w: bw, h: bh };
+  return drawStoneButton(ctx, x, y, bw, bh, {
+    label: '← Back',
+    variant: 'secondary',
+    hovered,
+    fontSize: 16,
+  });
 }
 
 export function drawStickerPopup(
@@ -413,31 +594,13 @@ export function drawEasyModeButton(
   const bw = 80;
   const bh = 34;
   const hovered = mouseX > x && mouseX < x + bw && mouseY > y && mouseY < y + bh;
-
-  ctx.save();
-  ctx.fillStyle = active
-    ? 'rgba(76,175,80,0.7)'
-    : hovered ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
-  ctx.beginPath();
-  ctx.roundRect(x, y, bw, bh, 10);
-  ctx.fill();
-
-  if (hovered || active) {
-    ctx.shadowColor = active ? 'rgba(76,175,80,0.4)' : 'rgba(255,255,255,0.3)';
-    ctx.shadowBlur = 6;
-    ctx.strokeStyle = active ? 'rgba(76,175,80,0.8)' : 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 13px Fredoka, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(active ? '⭐ Easy' : 'Easy', x + bw / 2, y + bh / 2 + 5);
-  ctx.restore();
-
-  return { x, y, w: bw, h: bh };
+  return drawStoneButton(ctx, x, y, bw, bh, {
+    label: active ? '⭐ Easy' : 'Easy',
+    variant: active ? 'primary' : 'secondary',
+    hovered,
+    fontSize: 13,
+    borderRadius: 10,
+  });
 }
 
 export function drawHintButton(
@@ -451,31 +614,12 @@ export function drawHintButton(
   const bw = 44;
   const bh = 44;
   const hovered = mouseX > x && mouseX < x + bw && mouseY > y && mouseY < y + bh;
-
-  ctx.save();
-  ctx.fillStyle = active
-    ? 'rgba(255,215,0,0.6)'
-    : hovered ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
-  ctx.beginPath();
-  ctx.roundRect(x, y, bw, bh, 14);
-  ctx.fill();
-
-  if (hovered || active) {
-    ctx.shadowColor = active ? 'rgba(255,215,0,0.4)' : 'rgba(255,255,255,0.3)';
-    ctx.shadowBlur = 8;
-    ctx.strokeStyle = active ? 'rgba(255,215,0,0.7)' : 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-  }
-
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = active ? '#333' : '#fff';
-  ctx.font = '22px serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('⌨️', x + bw / 2, y + bh / 2 + 7);
-  ctx.restore();
-
-  return { x, y, w: bw, h: bh };
+  return drawStoneButton(ctx, x, y, bw, bh, {
+    drawIcon: (c, cx, cy, variant) => drawKeyboardIcon(c, cx, cy, variant),
+    variant: active ? 'primary' : 'secondary',
+    hovered,
+    borderRadius: 12,
+  });
 }
 
 export function drawKeyboardOverlay(

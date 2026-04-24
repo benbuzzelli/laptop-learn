@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { FONT, color, fontSize, radius, shadow } from '../ui';
 
 const NOTES_KEY = 'testerNotes';
 const DRAFT_KEY = 'testerNotesDraft';
@@ -111,7 +112,7 @@ export function TesterNotes({
       style={{
         position: 'absolute',
         inset: 0,
-        background: 'rgba(0,0,0,0.55)',
+        background: color.overlaySoft,
         zIndex: 50,
         display: 'flex',
         alignItems: 'center',
@@ -125,14 +126,14 @@ export function TesterNotes({
           maxHeight: '90dvh',
           background: '#1f1f2e',
           color: '#fff',
-          borderRadius: 16,
+          borderRadius: radius['2xl'],
           border: '1px solid rgba(255,255,255,0.15)',
-          boxShadow: '0 18px 50px rgba(0,0,0,0.55)',
+          boxShadow: shadow.card,
           padding: 22,
           display: 'flex',
           flexDirection: 'column',
           gap: 16,
-          fontFamily: 'Fredoka, sans-serif',
+          fontFamily: FONT,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -153,8 +154,8 @@ export function TesterNotes({
           </button>
         </div>
 
-        <div style={{ fontSize: 18 }}>
-          Currently in: <strong style={{ color: '#FFD54F' }}>{getLocation()}</strong>
+        <div style={{ fontSize: fontSize.lg }}>
+          Currently in: <strong style={{ color: color.goldLight }}>{getLocation()}</strong>
         </div>
 
         <textarea
